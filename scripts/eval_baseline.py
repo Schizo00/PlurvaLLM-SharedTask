@@ -24,6 +24,13 @@ LANG_FILES = {
     "id": DATA_DIR / "indonesian_dev.jsonl",
     "si": DATA_DIR / "sri_lankan_dev.jsonl",
 }
+# The held-out split train_macro_lora_pt.py validates against (already
+# prompt/completion-templated by prepare_training_data.py).
+VAL_FILES = {
+    "zh": DATA_DIR / "val" / "val_zh.jsonl",
+    "id": DATA_DIR / "val" / "val_id.jsonl",
+    "si": DATA_DIR / "val" / "val_si.jsonl",
+}
 
 LETTER_RE = re.compile(r"\b([ABCD])\b")
 THINK_RE = re.compile(r"^.*?</think>", re.DOTALL)
@@ -62,14 +69,18 @@ Return only the correct option text. Expected output is either the text of 'A', 
 }
 
 
-def load_rows(lang: str):
+def read_jsonl(path: Path):
     rows = []
-    with open(LANG_FILES[lang], encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
     return rows
+
+
+def load_rows(lang: str):
+    return read_jsonl(LANG_FILES[lang])
 
 
 SI_GOLD_MAP = {"Both": "C", "0": "D"}
@@ -151,6 +162,9 @@ def main():
     ap.add_argument("--adapter-path", default=None,
                      help="optional PEFT LoRA adapter dir (e.g. adapters/macro_lora_pt) "
                           "to apply on top of the base model")
+    ap.add_argument("--val-only", action="store_true",
+                     help="score data/val/val_<lang>.jsonl (train_macro_lora_pt.py's "
+                          "held-out split) instead of the full dev set")
     ap.add_argument("--n", type=int, default=None, help="sample size (default: all rows)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-tokens", type=int, default=40)
@@ -159,7 +173,10 @@ def main():
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    rows = load_rows(args.lang)
+    if args.val_only:
+        rows = read_jsonl(VAL_FILES[args.lang])
+    else:
+        rows = load_rows(args.lang)
     if args.n is not None and args.n < len(rows):
         random.Random(args.seed).shuffle(rows)
         rows = rows[: args.n]
@@ -187,7 +204,10 @@ def main():
     model.to(device)
     model.eval()
 
-    out_path = args.out or f"results_{Path(args.model_path).name}_{args.lang}.jsonl"
+    out_path = args.out or (
+        f"results_{Path(args.model_path).name}_{args.lang}"
+        f"{'_valonly' if args.val_only else ''}.jsonl"
+    )
     out_f = open(out_path, "w", encoding="utf-8")
 
     correct = 0
@@ -197,14 +217,22 @@ def main():
     t0 = time.time()
 
     for i, row in enumerate(tqdm(rows, desc="Evaluating")):
-        gold = resolve_gold(args.lang, row["Gold_Answer"])
-        if gold is None:
-            dropped_no_majority += 1
-            continue
+        if args.val_only:
+            # Already resolved/templated by prepare_training_data.py -- the
+            # completion IS the gold letter, e.g. " A".
+            gold = row["completion"].strip()
+            options = None
+            valid_letters = {"A", "B", "C", "D"}
+            prompt = row["prompt"]
+        else:
+            gold = resolve_gold(args.lang, row["Gold_Answer"])
+            if gold is None:
+                dropped_no_majority += 1
+                continue
 
-        options = resolve_options(args.lang, row)
-        valid_letters = {l for l in "ABCD" if options[l]}
-        prompt = build_prompt(args.lang, row, options)
+            options = resolve_options(args.lang, row)
+            valid_letters = {l for l in "ABCD" if options[l]}
+            prompt = build_prompt(args.lang, row, options)
 
         messages = [{"role": "user", "content": prompt}]
         template_kwargs = {} if args.enable_thinking else {"enable_thinking": False}
@@ -244,7 +272,7 @@ def main():
         out_f.write(
             json.dumps(
                 {
-                    "ID": row["ID"],
+                    "ID": row.get("ID", i),
                     "gold": gold,
                     "pred": pred,
                     "correct": is_correct,

@@ -28,6 +28,7 @@ Expected data layout (one prompt/completion jsonl per language):
 import argparse
 import json
 import random
+import shutil
 import time
 from pathlib import Path
 
@@ -127,7 +128,10 @@ def _language_batch_loss(model, examples, pad_token_id, device):
     valid = (labels != -100)
     tok_count = valid.sum(dim=1).clamp(min=1)
     per_example_loss = (token_ce * valid).sum(dim=1) / tok_count
-    return per_example_loss.mean()
+    with torch.no_grad():
+        correct = (logits.argmax(dim=-1) == labels) & valid
+        accuracy = (correct.sum().float() / valid.sum().clamp(min=1)).item()
+    return per_example_loss.mean(), accuracy
 
 
 def macro_lang_backward(model, batches_by_lang, pad_token_id, device):
@@ -140,19 +144,26 @@ def macro_lang_backward(model, batches_by_lang, pad_token_id, device):
     here since Qwen3.5's linear-attention fallback (transformers' plain-torch
     path, used when flash-linear-attention/causal-conv1d aren't installed) is
     already unusually memory-hungry per forward pass. Returns the summed
-    macro loss value (float) for reporting; gradients are left in .grad for
-    the caller to optimizer.step() once, after all languages are done."""
+    macro loss value (float) for reporting, plus a per-language token-level
+    next-token accuracy dict; gradients are left in .grad for the caller to
+    optimizer.step() once, after all languages are done."""
     total = 0.0
+    lang_acc = {}
     for lang in LANGS:
-        lang_loss = _language_batch_loss(model, batches_by_lang[lang], pad_token_id, device)
+        lang_loss, acc = _language_batch_loss(model, batches_by_lang[lang], pad_token_id, device)
         (lang_loss / len(LANGS)).backward()
         total += lang_loss.item()
-    return total / len(LANGS)
+        lang_acc[lang] = acc
+    return total / len(LANGS), lang_acc
 
 
 @torch.no_grad()
 def per_language_validate(model, val_datasets, batch_size, val_batches, pad_token_id, device, rng):
+    """Returns the macro (equal-weight across languages) val loss, mirroring
+    the macro-averaged training objective, so early stopping watches the same
+    quantity the model is actually optimized for."""
     model.eval()
+    lang_losses = {}
     for lang, ds in val_datasets.items():
         losses = []
         for _ in range(val_batches):
@@ -168,8 +179,21 @@ def per_language_validate(model, val_datasets, batch_size, val_batches, pad_toke
             tok_count = valid.sum(dim=1).clamp(min=1)
             per_example_loss = (token_ce * valid).sum(dim=1) / tok_count
             losses.append(per_example_loss.mean().item())
-        tqdm.write(f"  val_loss[{lang}]={sum(losses)/len(losses):.4f}")
+        lang_losses[lang] = sum(losses) / len(losses)
+        tqdm.write(f"  val_loss[{lang}]={lang_losses[lang]:.4f}")
     model.train()
+    return sum(lang_losses.values()) / len(lang_losses)
+
+
+def save_best_known(model, adapter_path, best_adapter_path):
+    """Fixed-interval periodic save mirrors the best-known checkpoint rather
+    than the current in-memory weights, so adapter_path is never worse than
+    best_adapter_path (which matters once early stopping has fired, since by
+    then the live model is `patience` evals past the actual best)."""
+    if best_adapter_path.exists():
+        shutil.copytree(best_adapter_path, adapter_path, dirs_exist_ok=True)
+    else:
+        model.save_pretrained(str(adapter_path))
 
 
 def main():
@@ -182,8 +206,11 @@ def main():
                      help="examples per language per step; total batch = this x 3")
     ap.add_argument("--iters", type=int, default=500)
     ap.add_argument("--steps-per-report", type=int, default=10)
-    ap.add_argument("--steps-per-eval", type=int, default=50)
+    ap.add_argument("--steps-per-eval", type=int, default=5)
     ap.add_argument("--val-batches", type=int, default=10)
+    ap.add_argument("--patience", type=int, default=10,
+                     help="stop after this many consecutive evals with no "
+                          "macro val-loss improvement (0 disables early stopping)")
     ap.add_argument("--max-seq-length", type=int, default=768)
     ap.add_argument("--grad-checkpoint", action="store_true", default=True)
     ap.add_argument("--no-grad-checkpoint", dest="grad_checkpoint", action="store_false")
@@ -244,40 +271,66 @@ def main():
 
     adapter_path = Path(args.adapter_path)
     adapter_path.mkdir(parents=True, exist_ok=True)
+    best_adapter_path = adapter_path / "best"
+    best_val_loss = float("inf")
+    stale_evals = 0
 
     losses, steps, t0 = 0.0, 0, time.time()
+    lang_acc_sums = {lang: 0.0 for lang in LANGS}
     print("Starting training (simultaneous zh/id/si, macro-averaged loss)...")
     pbar = tqdm(range(1, args.iters + 1), desc="train", unit="it")
     for it in pbar:
+        step_t0 = time.time()
         batches_by_lang = {
             lang: sample_batch(train_datasets[lang], args.per_lang_batch_size, rng)
             for lang in LANGS
         }
         optimizer.zero_grad()
-        loss_value = macro_lang_backward(model, batches_by_lang, tokenizer.pad_token_id, device)
+        loss_value, lang_acc = macro_lang_backward(model, batches_by_lang, tokenizer.pad_token_id, device)
         optimizer.step()
+        step_dt = time.time() - step_t0
 
         losses += loss_value
         steps += 1
+        for lang in LANGS:
+            lang_acc_sums[lang] += lang_acc[lang]
         pbar.set_postfix(loss=f"{loss_value:.4f}")
+
+        acc_str = " ".join(f"acc[{lang}]={lang_acc[lang]:.3f}" for lang in LANGS)
+        tqdm.write(f"[iter {it}/{args.iters}] loss={loss_value:.4f} {acc_str} dt={step_dt:.1f}s")
 
         if it % args.steps_per_report == 0 or it == args.iters:
             elapsed = time.time() - t0
-            tqdm.write(f"[iter {it}] train_loss(macro)={losses/steps:.4f} elapsed={elapsed:.0f}s")
+            acc_str = " ".join(f"acc[{lang}]={lang_acc_sums[lang]/steps:.3f}" for lang in LANGS)
+            tqdm.write(f"[iter {it}] train_loss(macro)={losses/steps:.4f} {acc_str} elapsed={elapsed:.0f}s")
             losses, steps = 0.0, 0
+            lang_acc_sums = {lang: 0.0 for lang in LANGS}
 
         if it % args.steps_per_eval == 0 or it == args.iters:
-            per_language_validate(
+            val_loss = per_language_validate(
                 model, val_datasets, args.per_lang_batch_size, args.val_batches,
                 tokenizer.pad_token_id, device, rng,
             )
+            tqdm.write(f"[iter {it}] val_loss(macro)={val_loss:.4f}")
+            stop_early = False
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                stale_evals = 0
+                model.save_pretrained(str(best_adapter_path))
+                tqdm.write(f"[iter {it}] New best macro val loss; saved best adapter to {best_adapter_path}")
+            else:
+                stale_evals += 1
+                tqdm.write(f"[iter {it}] No improvement ({stale_evals}/{args.patience})")
+                if args.patience > 0 and stale_evals >= args.patience:
+                    tqdm.write(f"[iter {it}] Early stopping: no macro val loss improvement for {args.patience} evals.")
+                    stop_early = True
+            save_best_known(model, adapter_path, best_adapter_path)
+            tqdm.write(f"[iter {it}] Saved best-known LoRA adapter to {adapter_path}")
+            if stop_early:
+                break
 
-        if it % 100 == 0 or it == args.iters:
-            model.save_pretrained(str(adapter_path))
-            tqdm.write(f"[iter {it}] Saved LoRA adapter to {adapter_path}")
-
-    model.save_pretrained(str(adapter_path))
-    print(f"Saved final LoRA adapter to {adapter_path}")
+    save_best_known(model, adapter_path, best_adapter_path)
+    print(f"Saved final (best-known) LoRA adapter to {adapter_path}")
 
 
 if __name__ == "__main__":
