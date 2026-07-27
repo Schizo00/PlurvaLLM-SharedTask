@@ -1,7 +1,8 @@
 """LoRA fine-tune Qwen3.5-4B (PyTorch/transformers/peft) with simultaneous
 zh/id/si training and a macro-averaged loss.
 
-Runs on MPS. mlx_vlm's Qwen3.5 implementation was confirmed unable to train
+Runs on CUDA, MPS, or CPU (auto-detected, CUDA preferred). mlx_vlm's Qwen3.5
+implementation was confirmed unable to train
 (the Gated DeltaNet hybrid-attention layers use a custom Metal kernel with no
 registered backward/vjp rule); transformers falls back to a plain PyTorch
 implementation of the same layers when flash-linear-attention/causal-conv1d
@@ -137,8 +138,9 @@ def macro_lang_backward(model, batches_by_lang, pad_token_id, device):
     combined loss tensor. A single combined backward would keep all three
     languages' full forward computation graphs alive simultaneously; calling
     backward per-language frees each graph immediately, which matters a lot
-    here since Qwen3.5's linear-attention fallback (no CUDA fast-path on Mac)
-    is already unusually memory-hungry per forward pass. Returns the summed
+    here since Qwen3.5's linear-attention fallback (transformers' plain-torch
+    path, used when flash-linear-attention/causal-conv1d aren't installed) is
+    already unusually memory-hungry per forward pass. Returns the summed
     macro loss value (float) for reporting; gradients are left in .grad for
     the caller to optimizer.step() once, after all languages are done."""
     total = 0.0
@@ -192,12 +194,23 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"Loading {args.model_id} on {device} ...")
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    # bf16 needs Ampere+ (sm_80) on CUDA; older GPUs (e.g. V100) silently
+    # produce NaNs/garbage under bf16 matmuls, so fall back to fp16 there.
+    if device == "cuda" and not torch.cuda.is_bf16_supported():
+        dtype = torch.float16
+    else:
+        dtype = torch.bfloat16
+    print(f"Loading {args.model_id} on {device} ({dtype}) ...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(args.model_id, dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(args.model_id, dtype=dtype)
     model.to(device)
 
     lora_config = LoraConfig(
