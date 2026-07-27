@@ -88,20 +88,21 @@ more tokens.
 
 ## 4. Evaluate
 
-`scripts/eval_baseline.py` runs zero-shot MCQ eval, but only loads plain
-`mlx_lm`/`mlx_vlm` model directories — it does not currently support loading
-a PEFT/PyTorch adapter. To evaluate a `train_macro_lora_pt.py` adapter, merge
-it onto the base model first:
+`scripts/eval_baseline.py` runs zero-shot MCQ eval (PyTorch/`transformers`,
+same CUDA/MPS/CPU auto-detection as training). It applies the same chat
+template + `enable_thinking=False` formatting used during training, so
+results are directly comparable to what training saw.
 
-```python
-from peft import PeftModel
-from transformers import AutoModelForCausalLM
-
-base = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-4B", dtype="bfloat16")
-model = PeftModel.from_pretrained(base, "adapters/macro_lora_pt")
-model = model.merge_and_unload()
-model.save_pretrained("models/qwen3.5-4b-macro-lora-merged")
+Base model, zero-shot:
+```bash
+python scripts/eval_baseline.py Qwen/Qwen3.5-4B zh --n 200
 ```
 
-then evaluate the merged model with your own `transformers`-based scoring
-loop, or convert it to MLX to reuse `eval_baseline.py`.
+With a trained LoRA adapter applied on top of the base model:
+```bash
+python scripts/eval_baseline.py Qwen/Qwen3.5-4B zh \
+    --adapter-path adapters/macro_lora_pt --n 200
+```
+
+Writes per-row predictions to `--out` (default
+`results_<model_name>_<lang>.jsonl`) and prints a final accuracy summary.

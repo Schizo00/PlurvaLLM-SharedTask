@@ -57,8 +57,7 @@ class PromptCompletionDataset:
 
     row["prompt"] is the RAW (un-templated) prompt text -- the chat template
     is applied here, with enable_thinking=False, so training-time formatting
-    matches exactly what the zero-shot eval used (mlx_vlm's
-    apply_chat_template earlier in this project)."""
+    matches exactly what scripts/eval_baseline.py's zero-shot eval uses."""
 
     def __init__(self, rows, tokenizer, max_seq_length):
         self.examples = []

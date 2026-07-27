@@ -1,7 +1,12 @@
 """Zero-shot MCQ baseline eval for candidate base models against PlurVA dev sets.
 
+PyTorch/transformers-based (runs on CUDA, MPS, or CPU, auto-detected --
+mirrors scripts/train_macro_lora_pt.py). Optionally applies a PEFT LoRA
+adapter on top of the base model, so a train_macro_lora_pt.py checkpoint can
+be evaluated directly without a separate merge step.
+
 Usage:
-    python eval_baseline.py <mlx_model_path> <lang: zh|id> [--n N] [--seed S] [--out path.jsonl]
+    python eval_baseline.py <model_id_or_path> <lang: zh|id|si> [--adapter-path DIR] [--n N] [--seed S] [--out path.jsonl]
 """
 import argparse
 import json
@@ -141,10 +146,11 @@ def extract_letter(text: str, valid_letters, options=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("model_path")
+    ap.add_argument("model_path", help="HF model id or local path (base model)")
     ap.add_argument("lang", choices=["zh", "id", "si"])
-    ap.add_argument("--backend", choices=["lm", "vlm"], default="lm",
-                     help="mlx_lm (text-only models) or mlx_vlm (natively multimodal, e.g. Qwen3.5)")
+    ap.add_argument("--adapter-path", default=None,
+                     help="optional PEFT LoRA adapter dir (e.g. adapters/macro_lora_pt) "
+                          "to apply on top of the base model")
     ap.add_argument("--n", type=int, default=None, help="sample size (default: all rows)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-tokens", type=int, default=40)
@@ -158,14 +164,28 @@ def main():
         random.Random(args.seed).shuffle(rows)
         rows = rows[: args.n]
 
-    print(f"Loading model from {args.model_path} (backend={args.backend}) ...", file=sys.stderr)
-    if args.backend == "vlm":
-        from mlx_vlm import load, generate as vlm_generate
-        model, tok_or_proc = load(args.model_path)
-        model_config = model.config
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
     else:
-        from mlx_lm import load, generate as lm_generate
-        model, tok_or_proc = load(args.model_path)
+        device = "cpu"
+    dtype = torch.float16 if device == "cuda" and not torch.cuda.is_bf16_supported() else torch.bfloat16
+
+    print(f"Loading {args.model_path} on {device} ({dtype}) ...", file=sys.stderr)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(args.model_path, dtype=dtype)
+    if args.adapter_path:
+        from peft import PeftModel
+        print(f"Applying LoRA adapter from {args.adapter_path} ...", file=sys.stderr)
+        model = PeftModel.from_pretrained(model, args.adapter_path)
+    model.to(device)
+    model.eval()
 
     out_path = args.out or f"results_{Path(args.model_path).name}_{args.lang}.jsonl"
     out_f = open(out_path, "w", encoding="utf-8")
@@ -189,34 +209,28 @@ def main():
         messages = [{"role": "user", "content": prompt}]
         template_kwargs = {} if args.enable_thinking else {"enable_thinking": False}
 
-        if args.backend == "vlm":
-            from mlx_vlm.prompt_utils import apply_chat_template as vlm_apply_chat_template
-            try:
-                chat_prompt = vlm_apply_chat_template(
-                    tok_or_proc, model_config, messages,
-                    add_generation_prompt=True, num_images=0, **template_kwargs,
-                )
-            except Exception:
-                chat_prompt = prompt
-            response = vlm_generate(
-                model, tok_or_proc, prompt=chat_prompt, image=None,
-                max_tokens=args.max_tokens, verbose=False,
+        try:
+            chat_prompt = tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False, **template_kwargs
             )
-            response = response.text if hasattr(response, "text") else str(response)
-        else:
-            try:
-                chat_prompt = tok_or_proc.apply_chat_template(
-                    messages, add_generation_prompt=True, tokenize=False, **template_kwargs
-                )
-            except TypeError:
-                chat_prompt = tok_or_proc.apply_chat_template(
-                    messages, add_generation_prompt=True, tokenize=False
-                )
-            except Exception:
-                chat_prompt = prompt
-            response = lm_generate(
-                model, tok_or_proc, prompt=chat_prompt, max_tokens=args.max_tokens, verbose=False
+        except TypeError:
+            chat_prompt = tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
             )
+        except Exception:
+            chat_prompt = prompt
+
+        inputs = tokenizer(chat_prompt, return_tensors="pt", add_special_tokens=False).to(device)
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=args.max_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        response = tokenizer.decode(
+            output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+        )
 
         pred = extract_letter(response, valid_letters, options)
 
