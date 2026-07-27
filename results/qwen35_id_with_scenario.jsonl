@@ -1,0 +1,81 @@
+{"ID": "ID_1596", "gold": "C", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_1340", "gold": "C", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_961", "gold": "C", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_1473", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Menggunakan platform Anda untuk mengadvokasi liputan media yang lebih adil, meskipun itu berarti menentang beberapa kebijakan partai Anda."}
+{"ID": "ID_180", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1544", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1981", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}
+{"ID": "ID_1781", "gold": "B", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_1752", "gold": "D", "pred": "D", "correct": true, "raw_response": "Option D"}
+{"ID": "ID_956", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_474", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Berusaha memperjelas bahwa organisasi harus tetap netral dan mengeluarkan pernyataan untuk menegaskan sikap ini, meskipun mungkin mendapat tekanan dari dalam."}
+{"ID": "ID_1239", "gold": "C", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_282", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}
+{"ID": "ID_1931", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1915", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_353", "gold": "C", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_578", "gold": "D", "pred": "D", "correct": true, "raw_response": "Option D"}
+{"ID": "ID_751", "gold": "D", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_390", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_1612", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1495", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_1344", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C: Berkonsultasi dengan tokoh masyarakat dan ulama setempat untuk menemukan solusi yang dapat diterima semua pihak."}
+{"ID": "ID_1859", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}
+{"ID": "ID_1843", "gold": "B", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_387", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_42", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C: Anda menyarankan untuk mengombinasikan keduanya, menggunakan inovasi baru sambil tetap memanfaatkan platform yang sudah ada agar tidak kehilangan koneksi dengan masyarakat yang sudah terbiasa dengan cara lama."}
+{"ID": "ID_1031", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_545", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Mendukung penerapan pajak yang adil pada keuntungan komoditas untuk semua pengusaha, meski itu berarti mengurangi pengaruh ekonomi Anda."}
+{"ID": "ID_899", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C: Mengadakan dialog bersama dengan tokoh agama dan masyarakat sekitar untuk mencari keputusan yang disepakati bersama, meskipun mungkin berbeda dari aturan pemerintah."}
+{"ID": "ID_772", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Mendukung penyelidikan dengan harapan dapat mengungkapkan kebenaran dan memperkuat prinsip demokrasi meskipun mungkin memicu keresahan sementara di masyarakat."}
+{"ID": "ID_449", "gold": "A", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_624", "gold": "A", "pred": "C", "correct": false, "raw_response": "Option C: Mencari bantuan atau informasi lebih lanjut agar bisa mengurus pindah memilih tepat waktu, meskipun harus meluangkan waktu di sela-sela kesibukan."}
+{"ID": "ID_1958", "gold": "D", "pred": "D", "correct": true, "raw_response": "Option D"}
+{"ID": "ID_1735", "gold": "C", "pred": "B", "correct": false, "raw_response": "Option B"}
+{"ID": "ID_1165", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_856", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Memprioritaskan investigasi menyeluruh dan memberikan sanksi kepada oknum yang terlibat, meskipun ini dapat memperlambat seluruh proses seleksi."}
+{"ID": "ID_913", "gold": "C", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_146", "gold": "C", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_1131", "gold": "B", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_1295", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_290", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1500", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_137", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_809", "gold": "C", "pred": "B", "correct": false, "raw_response": "Option B"}
+{"ID": "ID_1885", "gold": "D", "pred": "D", "correct": true, "raw_response": "Option D"}
+{"ID": "ID_542", "gold": "B", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_193", "gold": "A", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_1254", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Memprioritaskan penegakan hukum dan mendesak penyelidikan lebih lanjut untuk memberi contoh ketegasan, meskipun berpotensi menimbulkan ketidakpuasan di kalangan pegawai pemerintah yang lain."}
+{"ID": "ID_1569", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Menyarankan dialog terbuka dengan partai politik untuk mencari titik temu dan memperkuat kerja sama sesuai nilai agama dan politik yang mencerdaskan kehidupan bangsa."}
+{"ID": "ID_983", "gold": "C", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_1302", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1866", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_1016", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_507", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_1212", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}
+{"ID": "ID_1244", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_488", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A: Melaporkan kasus tersebut secara transparan kepada pihak berwenang meskipun itu bisa merusak citra instansi."}
+{"ID": "ID_770", "gold": "C", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_629", "gold": "D", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_191", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}
+{"ID": "ID_102", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_1646", "gold": "A", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_660", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1594", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_796", "gold": "D", "pred": "D", "correct": true, "raw_response": "Option D"}
+{"ID": "ID_729", "gold": "A", "pred": "C", "correct": false, "raw_response": "Option C: Memberikan dispensasi impor sementara untuk bahan baku yang krusial dan belum dapat dipenuhi di dalam negeri, sambil tetap memantau perkembangan kapasitas nasional."}
+{"ID": "ID_1800", "gold": "A", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_1104", "gold": "A", "pred": "D", "correct": false, "raw_response": "Option D"}
+{"ID": "ID_1142", "gold": "C", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_1559", "gold": "B", "pred": "C", "correct": false, "raw_response": "Option C"}
+{"ID": "ID_1896", "gold": "C", "pred": "B", "correct": false, "raw_response": "Option B: Mengadopsi asesmen baru yang tidak menghukum, tetapi memerlukan waktu dan sumber daya lebih untuk melatih guru menggunakan sistem baru."}
+{"ID": "ID_1028", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_1298", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}
+{"ID": "ID_1001", "gold": "C", "pred": "A", "correct": false, "raw_response": "Option A"}
+{"ID": "ID_1148", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1337", "gold": "C", "pred": "C", "correct": true, "raw_response": "Option C"}
+{"ID": "ID_361", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_646", "gold": "D", "pred": "D", "correct": true, "raw_response": "Option D"}
+{"ID": "ID_1315", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1452", "gold": "A", "pred": "A", "correct": true, "raw_response": "Option A"}
+{"ID": "ID_1450", "gold": "B", "pred": "B", "correct": true, "raw_response": "Option B"}

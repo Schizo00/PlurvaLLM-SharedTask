@@ -1,0 +1,5 @@
+Loading model from models/seallms-v3-7b-4bit ...
+[25/100] acc_so_far=0.520 elapsed=107s
+[50/100] acc_so_far=0.560 elapsed=215s
+[75/100] acc_so_far=0.507 elapsed=309s
+[100/100] acc_so_far=0.460 elapsed=408s

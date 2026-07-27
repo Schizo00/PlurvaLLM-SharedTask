@@ -1,0 +1,11 @@
+{
+  "model": "mlx-community/Qwen3.5-4B-MLX-4bit",
+  "lang": "id",
+  "n_rows": 100,
+  "scored": 81,
+  "dropped_no_majority": 19,
+  "unparseable": 0,
+  "correct": 50,
+  "accuracy": 0.6172839506172839,
+  "elapsed_sec": 103.55910801887512
+}

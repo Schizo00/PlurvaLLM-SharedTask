@@ -1,0 +1,11 @@
+{
+  "model": "models/seallms-v3-7b-4bit",
+  "lang": "zh",
+  "n_rows": 100,
+  "scored": 100,
+  "dropped_no_majority": 0,
+  "unparseable": 0,
+  "correct": 39,
+  "accuracy": 0.39,
+  "elapsed_sec": 360.3672456741333
+}

@@ -1,0 +1,11 @@
+{
+  "model": "mlx-community/Qwen3.5-4B-MLX-4bit",
+  "lang": "zh",
+  "n_rows": 100,
+  "scored": 100,
+  "dropped_no_majority": 0,
+  "unparseable": 0,
+  "correct": 58,
+  "accuracy": 0.58,
+  "elapsed_sec": 245.57795310020447
+}

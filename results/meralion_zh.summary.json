@@ -1,0 +1,11 @@
+{
+  "model": "models/meralion-llama3-8b-4bit",
+  "lang": "zh",
+  "n_rows": 100,
+  "scored": 100,
+  "dropped_no_majority": 0,
+  "unparseable": 0,
+  "correct": 38,
+  "accuracy": 0.38,
+  "elapsed_sec": 621.7083601951599
+}

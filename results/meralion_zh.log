@@ -1,0 +1,5 @@
+Loading model from models/meralion-llama3-8b-4bit ...
+[25/100] acc_so_far=0.400 elapsed=159s
+[50/100] acc_so_far=0.380 elapsed=314s
+[75/100] acc_so_far=0.320 elapsed=475s
+[100/100] acc_so_far=0.380 elapsed=622s
