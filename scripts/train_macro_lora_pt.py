@@ -218,6 +218,11 @@ def main():
     ap.add_argument("--lora-rank", type=int, default=16)
     ap.add_argument("--lora-alpha", type=float, default=32.0)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--max-grad-norm", type=float, default=1.0,
+                     help="gradient-norm clip applied before every optimizer step. On CUDA GPUs "
+                          "without bf16 support this falls back to fp16 with no loss-scaling, so an "
+                          "unclipped gradient spike can overflow and permanently NaN the weights in "
+                          "a single step.")
     args = ap.parse_args()
 
     if torch.cuda.is_available():
@@ -287,6 +292,7 @@ def main():
         }
         optimizer.zero_grad()
         loss_value, lang_acc = macro_lang_backward(model, batches_by_lang, tokenizer.pad_token_id, device)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
         optimizer.step()
         step_dt = time.time() - step_t0
 

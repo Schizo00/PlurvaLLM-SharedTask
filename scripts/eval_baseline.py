@@ -86,22 +86,29 @@ def load_rows(lang: str):
 SI_GOLD_MAP = {"Both": "C", "0": "D"}
 
 
+def resolve_gold_candidates(lang: str, gold_answer: str):
+    """Return the gold letter(s) for gold_answer as a list: a single-item list
+    for single-letter answers and Sri Lankan's 'Both'/'0' labels, or Indonesian's
+    comma-separated annotator votes when there's a strict majority; a
+    multi-item list of the tied top letters when there's no strict majority
+    (e.g. "C, D, A, A, D" -> ["A", "D"])."""
+    gold_answer = gold_answer.strip()
+    if lang == "si" and gold_answer in SI_GOLD_MAP:
+        return [SI_GOLD_MAP[gold_answer]]
+    if "," in gold_answer:
+        votes = [v.strip() for v in gold_answer.split(",")]
+        counts = Counter(votes)
+        top_n = counts.most_common(1)[0][1]
+        return sorted(letter for letter, n in counts.items() if n == top_n)
+    return [gold_answer]
+
+
 def resolve_gold(lang: str, gold_answer: str):
     """Handle single-letter gold answers, Indonesian's comma-separated
     annotator votes (majority vote; drop rows with no strict majority), and
     Sri Lankan's 'Both'/'0' labels (map to the fixed C/D meta-options)."""
-    gold_answer = gold_answer.strip()
-    if lang == "si" and gold_answer in SI_GOLD_MAP:
-        return SI_GOLD_MAP[gold_answer]
-    if "," in gold_answer:
-        votes = [v.strip() for v in gold_answer.split(",")]
-        counts = Counter(votes)
-        top, top_n = counts.most_common(1)[0]
-        # strict majority required (ties -> drop)
-        if list(counts.values()).count(top_n) > 1:
-            return None
-        return top
-    return gold_answer
+    candidates = resolve_gold_candidates(lang, gold_answer)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def resolve_options(lang, row):
