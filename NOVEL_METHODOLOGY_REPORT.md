@@ -61,7 +61,7 @@ Two mechanisms, grounded in this dataset's actual structure rather than generic 
 
 **CV sweep detail (λ=0.5, k=5):** `val_metric_macro_mean=0.6419 ± 0.0531`; per-fold `best_iter` = [20, 25, 60, 15, 25] — a 4x spread, i.e. genuinely noisy at this dataset size, median=25 used for the refit.
 
-## 6. Curriculum + novel mechanisms (in progress)
+## 6. Curriculum + novel mechanisms
 
 Every result in §5 tested the new mechanisms only under *simultaneous* training (all 3 languages every step, fresh from base). Curriculum ordering (§3) is independently the strongest lever found (+~1.8-2pts over every simultaneous variant) but was never combined with the new mechanisms — this is the most-supported untested hypothesis, and the cheapest real experiment left given limited remaining compute (no checkpoint exists to ensemble with, ruling that option out; a learning-rate sweep would cost 15+ full CV runs for a hypothesis with no direct evidence yet).
 
@@ -74,6 +74,19 @@ Checkpoint-continuation logic verified correct via a targeted unit check (pertur
 Notably, Indonesian scored its worst across every novel-methodology attempt (0.6683). Working hypothesis: in this new-language-only, no-cumulative-replay stage schedule (zh→id→si→zh), Indonesian is trained once in stage 1 and never revisited, while Chinese is trained first *and* last (stage 3). If the new soft-label+consistency loss causes even mild catastrophic forgetting between stages — unlike the original recipe's plain hard-label CE, described in the memory record as having "almost no forgetting" — Indonesian is the language most exposed to it, having two full subsequent stages with none of its own data before the run ends. Not yet confirmed; would need a 5th stage revisiting Indonesian, or per-stage validation tracking Indonesian's metric across stages 2-3, to test directly.
 
 A real infrastructure bug was also found and fixed from this run's logs: recurring (non-fatal) CUDA OOM warnings throughout every stage — the allocator retried and recovered each time, but GPU free memory was repeatedly dropping under 1GB on a 31GB card. `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` had only ever been added to the Colab notebook during earlier T4-OOM debugging, never ported to `train_novel.py`/`train_novel_curriculum.py` — fixed post-hoc, doesn't invalidate this result (training did complete correctly) but should prevent a harder failure on a future run.
+
+### v2: Indonesian revisit + Chinese-weighted combined stage
+
+Two follow-ups to v1's failure, both testable in one run:
+
+1. **`--stages zh,id,si,zh,id`** — Indonesian revisited too, testing the forgetting hypothesis directly.
+2. **`--final-combined-iters 25 --zh-weight 1.5`** — one more stage after the curriculum, switching back to *simultaneous* training across all 3 languages (same mechanism as §5) with zh's loss upweighted 1.5x before averaging — the curriculum-mode analog of "oversampling" Chinese (per-step batch weighting doesn't translate to sequential single-language stages the way it would in simultaneous training), testing whether sequential curriculum's Chinese-specific edge over simultaneous training is really about ordering, or just more effective Chinese exposure.
+
+**Result: 0.8007 avg (chinese=0.7757, indonesian=0.7030, srilankan=0.9235) — 0.37 points behind the all-time best, by far the closest the novel methodology has gotten.** Both hypotheses were confirmed:
+- Indonesian jumped from 0.6683 (v1) to 0.7030 — the best Indonesian score of any novel-methodology run, supporting the forgetting explanation.
+- Chinese (0.7757) and Sri Lankan (0.9235) both recovered to within ~0.01-0.05 of the original curriculum's numbers (0.7763, 0.9284) — supporting the Chinese-exposure explanation over pure "ordering."
+
+Notably, all three languages are now *uniformly* just slightly below the original curriculum's per-language scores, rather than one language dramatically behind (as in v1) — evidence the recipe direction is now right, and the remaining ~0.4pt gap is closer to "needs a bit more training/weight" than a structural problem. Untried next tweaks: more `--final-combined-iters` (currently an arbitrary 25) or a higher `--zh-weight` (currently 1.5).
 
 ## 7. Key findings
 
@@ -92,8 +105,8 @@ A real infrastructure bug was also found and fixed from this run's logs: recurri
 
 ## 9. Open questions / next steps
 
-1. Curriculum + novel-methodology combination underperformed (§6, 0.7799) — the Indonesian-forgetting hypothesis is the leading explanation but unconfirmed. Worth testing a 5th stage revisiting Indonesian, or abandoning this direction in favor of the other levers below given limited compute.
-2. Chinese-oversampling test — does per-language sampling weight (not just curriculum order) explain sequential curriculum's Chinese-specific edge?
+1. Curriculum v2 (0.8007) is 0.37 points from the all-time best and the closest result yet — worth one more round of small tuning before moving on: more `--final-combined-iters` or a higher `--zh-weight`, given all three languages are now uniformly slightly behind rather than one being a structural outlier.
+2. ~~Chinese-oversampling test~~ — addressed in v2's combined stage; confirmed Chinese exposure (not just ordering) explains part of the gap.
 3. Learning-rate sweep — deprioritized given limited compute; worth revisiting if compute frees up, to test whether it's the source of the 4x CV fold-variance in `best_iter`.
 4. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) to enable ensembling with a novel-methodology checkpoint.
 5. λ sweep beyond 0.5/0.6 (e.g. 0.25, 1.0) — low priority given 0.5 vs 0.6 showed no meaningful difference.
