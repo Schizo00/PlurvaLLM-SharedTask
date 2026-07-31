@@ -86,7 +86,13 @@ Two follow-ups to v1's failure, both testable in one run:
 - Indonesian jumped from 0.6683 (v1) to 0.7030 — the best Indonesian score of any novel-methodology run, supporting the forgetting explanation.
 - Chinese (0.7757) and Sri Lankan (0.9235) both recovered to within ~0.01-0.05 of the original curriculum's numbers (0.7763, 0.9284) — supporting the Chinese-exposure explanation over pure "ordering."
 
-Notably, all three languages are now *uniformly* just slightly below the original curriculum's per-language scores, rather than one language dramatically behind (as in v1) — evidence the recipe direction is now right, and the remaining ~0.4pt gap is closer to "needs a bit more training/weight" than a structural problem. Untried next tweaks: more `--final-combined-iters` (currently an arbitrary 25) or a higher `--zh-weight` (currently 1.5).
+Notably, all three languages are now *uniformly* just slightly below the original curriculum's per-language scores, rather than one language dramatically behind (as in v1) — evidence the recipe direction is now right, and the remaining ~0.4pt gap is closer to "needs a bit more training/weight" than a structural problem.
+
+### v3: does more combined-stage training help? (no)
+
+Simplest next guess: keep `--zh-weight 1.5`, just increase `--final-combined-iters` from 25 to 40. Cheap to test — `train_novel_curriculum.py` gained a `--resume-from` flag so this retry reuses v2's already-trained `stage_4_id` checkpoint instead of redoing all 5 curriculum stages.
+
+**Result: 0.7986 avg (chinese=0.7586, indonesian=0.6975, srilankan=0.9398) — worse than v2 (0.8007), not better.** Chinese dropped 1.71pts and Indonesian dropped 0.55pts, while Sri Lankan *gained* 1.63pts. The "more iterations helps proportionally" hypothesis is disproven: more combined-stage training shifted the model toward Sri Lankan specifically. Likely explanation — Sri Lankan has the smallest dataset of the three (203 rows), so at a fixed batch size with replacement sampling, its small example pool gets relatively more repeated exposure as total iterations increase, even though the per-language loss weighting (zh=1.5, id=si=1.0) never changed. **v2 remains the best novel-methodology result.** Iteration count and per-language weight both need real tuning together, not just cranking one number up in isolation.
 
 ## 7. Key findings
 
@@ -105,7 +111,7 @@ Notably, all three languages are now *uniformly* just slightly below the origina
 
 ## 9. Open questions / next steps
 
-1. Curriculum v2 (0.8007) is 0.37 points from the all-time best and the closest result yet — worth one more round of small tuning before moving on: more `--final-combined-iters` or a higher `--zh-weight`, given all three languages are now uniformly slightly behind rather than one being a structural outlier.
+1. **Curriculum v2 (0.8007, `--final-combined-iters 25 --zh-weight 1.5`) is the best novel-methodology result and 0.37 points from the all-time best.** v3 showed simply increasing iterations doesn't help (it overfits toward Sri Lankan's smaller dataset instead) — remaining tuning needs to consider iteration count and per-language weight jointly, e.g. a lower `--zh-weight` at `--final-combined-iters 25`, or a per-language batch-size adjustment instead of loss reweighting. `--resume-from` makes each retry cheap (skips the 5 curriculum stages).
 2. ~~Chinese-oversampling test~~ — addressed in v2's combined stage; confirmed Chinese exposure (not just ordering) explains part of the gap.
 3. Learning-rate sweep — deprioritized given limited compute; worth revisiting if compute frees up, to test whether it's the source of the 4x CV fold-variance in `best_iter`.
 4. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) to enable ensembling with a novel-methodology checkpoint.
