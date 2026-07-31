@@ -5,80 +5,25 @@ Status as of 2026-07-31. Scores are against the shared task's **hidden test set*
 ## 0. Executive summary
 
 - **Current best, and the recommended submission: curriculum v5, 0.8062 macro accuracy** (chinese=0.7788, indonesian=0.7139, srilankan=0.9260) — beats the previous all-time-best of 0.8044 (the original ad-hoc sequential-curriculum recipe), and unlike that recipe, v5 has genuine mechanistic novelty: soft-label distillation from annotator disagreement + positional-consistency regularization + curriculum ordering + a Chinese-weighted final training stage.
-- Path to v5: baseline model selection (Qwen3.5-4B) → original ad-hoc curriculum (0.8044) → from-scratch novel-methodology redesign (soft-label + consistency + CV/refit, §5) reaching 0.7860-0.7863 under simultaneous training → combining curriculum ordering with the new mechanisms (§6, `train_novel_curriculum.py`) → five iterations (v1-v5) of hypothesis-driven tuning, landing on v5.
-- A follow-up attempt to make the whole recipe more rigorous — genuinely CV-validated iteration counts at every stage instead of a borrowed number, via a new separate script `train_novel_curriculum_cv.py` — came back *worse* (0.7911, §6). v5 remains the best result and stays untouched/submittable; more rigor didn't automatically mean a better result here (§6, §14).
-- Along the way: multiple real infrastructure bugs found and fixed (§10), a from-8.9GB-to-81MB git repo cleanup (§11), and several instances of experiment provenance getting mis-recorded and corrected (§12) — kept here as a record of what actually happened, not just the clean final story.
+- Path to v5: baseline model selection (Qwen3.5-4B) → original ad-hoc curriculum (0.8044) → from-scratch novel-methodology redesign (soft-label + consistency + CV/refit, §4) reaching 0.7860-0.7863 under simultaneous training → combining curriculum ordering with the new mechanisms (§5, `train_novel_curriculum.py`) → five iterations (v1-v5) of hypothesis-driven tuning, landing on v5.
+- A follow-up attempt to make the whole recipe more rigorous — genuinely CV-validated iteration counts at every stage instead of a borrowed number, via a new separate script `train_novel_curriculum_cv.py` — came back *worse* (0.7911, §5). v5 remains the best result and stays untouched/submittable; more rigor didn't automatically mean a better result here (§5, §13).
+- Along the way: multiple real infrastructure bugs found and fixed (§9), a from-8.9GB-to-81MB git repo cleanup (§10), and several instances of experiment provenance getting mis-recorded and corrected (§11) — kept here as a record of what actually happened, not just the clean final story.
 
 ## 1. Background
 
-The team led the Codabench leaderboard using Qwen3.5-4B with a hand-tuned sequential-curriculum LoRA recipe (0.8044 macro, §3). That result worked but wasn't methodologically defensible as a research contribution — it's SFT with a curriculum order found by trial and error. Three concrete problems motivated a from-scratch redesign (user's own framing):
+The team led the Codabench leaderboard using Qwen3.5-4B with a hand-tuned sequential-curriculum LoRA recipe (0.8044 macro, §2). That result worked but wasn't methodologically defensible as a research contribution — it's SFT with a curriculum order found by trial and error. Three concrete problems motivated a from-scratch redesign (user's own framing):
 
-1. **Validation wastes irreplaceable training data.** Dev sets are tiny (zh=790, id=366, si=203 rows; 1,359 labeled examples total, vs. a 5,475-row test set). A fixed validation split permanently sacrifices data on an already data-starved leaderboard task. → addressed via k-fold CV + final refit (§5).
-2. **The training-time accuracy metric was meaningless** — teacher-forced argmax accuracy on a 2-example batch (`train_macro_lora_pt.py`'s `_language_batch_loss`) can only read 0, 0.5, or 1.0, and isn't even the real eval metric (real eval is generation + letter extraction, not teacher-forced argmax). → addressed via a continuous expected-probability-mass metric (§5).
-3. **No genuine research novelty** — a hand-tuned curriculum order isn't a paper contribution. → addressed via two mechanisms grounded in the dataset's actual structure (§4).
+1. **Validation wastes irreplaceable training data.** Dev sets are tiny (zh=790, id=366, si=203 rows; 1,359 labeled examples total, vs. a 5,475-row test set). A fixed validation split permanently sacrifices data on an already data-starved leaderboard task. → addressed via k-fold CV + final refit (§4).
+2. **The training-time accuracy metric was meaningless** — teacher-forced argmax accuracy on a 2-example batch (`train_macro_lora_pt.py`'s `_language_batch_loss`) can only read 0, 0.5, or 1.0, and isn't even the real eval metric (real eval is generation + letter extraction, not teacher-forced argmax). → addressed via a continuous expected-probability-mass metric (§4).
+3. **No genuine research novelty** — a hand-tuned curriculum order isn't a paper contribution. → addressed via two mechanisms grounded in the dataset's actual structure (§3).
 
-Design constraints set at the start: run on **either** local M1 Pro (MPS) or a Colab/CUDA GPU (device-portable, no CUDA-only tooling like Unsloth); train **fresh from the base Qwen3.5-4B model**, not warm-started from any existing checkpoint (keeps the causal story clean — gains attributable to the new mechanisms, not extra gradient steps). The curriculum-mode work later in this doc (§6) deliberately departs from the fresh-from-base rule, since curriculum ordering *requires* checkpoint continuation between stages — that's a distinct, explicitly-flagged departure, not an oversight.
+Design constraints set at the start: run on **either** local M1 Pro (MPS) or a Colab/CUDA GPU (device-portable, no CUDA-only tooling like Unsloth); train **fresh from the base Qwen3.5-4B model**, not warm-started from any existing checkpoint (keeps the causal story clean — gains attributable to the new mechanisms, not extra gradient steps). The curriculum-mode work later in this doc (§5) deliberately departs from the fresh-from-base rule, since curriculum ordering *requires* checkpoint continuation between stages — that's a distinct, explicitly-flagged departure, not an oversight.
 
 **Foundational fact** (verified twice independently): for `Qwen/Qwen3.5-4B`'s tokenizer, the completions `" A"`/`" B"`/`" C"`/`" D"` each tokenize to exactly one token — IDs `{357, 417, 351, 414}`. This is what makes the soft-label/consistency mechanisms tractable without architectural surgery: the answer position in every training example is always exactly one token, found generically from the `-100` label mask (`(labels_shifted != -100).float().argmax(dim=1)`).
 
-## 2. Baseline model comparison (pre-fine-tuning)
+## 2. Best-known original strategy: sequential curriculum (0.8044, superseded by §4 v5)
 
-### 2a. Informal comparison (15 hand-picked questions per language, qualitative)
-
-| Model | Sinhala | Chinese | Indonesia | Macro Avg |
-|---|---|---|---|---|
-| Llama 3.1 (8B) | 0.33 | 0.26 | 0.73 | 0.44 |
-| Qwen 2.5 (7B) | 0.33 | 0.73 | 0.93 | 0.663 |
-| Gemma 3 (4B) | 0.4 | 0.4 | 0.8 | 0.53 |
-
-Qualitative notes from this pass: Qwen 2.5 8B gave correct Sinhala answers but incomplete explanations, incorrect Chinese answers, correct+good Indonesian. Llama 3.1 8B was correct on all three languages but with a recurring (repetitive) Sinhala explanation style. Gemma 3 4B answered Sinhala correctly only when the query was processed in English — forced-Sinhala queries got the wrong answer, with an explanation that actively mistranslated Sinhala meaning. Mistral-7B-v0.3 gave no good Sinhala response at all and was wrong on Indonesian.
-
-### 2b. Full dev-set zero-shot comparison
-
-| Model | chinese | indonesian | srilankan | macro avg |
-|---|---|---|---|---|
-| unsloth/llama-3.1-8b-Instruct-bnb-4bit | 0.2937 | 0.5710 | 0.3498 | 0.4048 |
-| unsloth/Ministral-3-3B-Instruct-2512 | 0.3582 | 0.4672 | 0.1970 | 0.3408 |
-| unsloth/Ministral-3-8B-Instruct-2512 | 0.2835 | 0.6120 | 0.2118 | 0.3691 |
-| mistralai/Mistral-7B-Instruct-v0.3 | 0.2975 | 0.4809 | 0.5271 (only ever answers "A") | 0.4351 |
-| Qwen/Qwen2.5-7B-Instruct | 0.4051 | 0.6175 | 0.5123 | 0.5116 |
-| google/gemma-3-4b-it | 0.4215 | 0.6421 | 0.6305 | 0.5647 |
-| MERaLiON-LLaMA-3-8B-Instruct | 0.3171 | 0.6376 | 0.6424 | 0.5323 |
-| Qwen/Qwen3.5-4B | 0.5694 | 0.6668 | 0.8243 | 0.6869 |
-| google/gemma-4-E4B-it | 0.5016 | 0.6485 | 0.9235 | 0.6912 |
-
-Qwen3.5-4B and Gemma-4-E4B-it were the strongest baselines; **Qwen3.5-4B was selected for all fine-tuning work.**
-
-### 2c. Sinhala zero-shot vs. one-shot (isolated finding, never incorporated into the fine-tuning pipeline)
-
-| Model | Zero-shot (203) | One-shot (202) |
-|---|---|---|
-| Qwen3-8B | 0.3547 | 0.6881 |
-| **Qwen3.5-4B** | **0.6207** | **0.7673** |
-| Llama-3.2-3B-Instruct | 0.4877 | 0.3663 |
-| Llama-3.1-8B-Instruct | 0.3498 | 0.7129 |
-| gemma-4-E4B-it | 0.5961 | 0.7228 |
-| gemma-3-4b-it | 0.7044 | 0.6188 |
-| Mistral-7B-Instruct-v0.3 | 0.5468 | 0.5050 |
-| DeepSeek-R1-Distill-Llama-8B | 0.4778 | 0.3218 |
-| DeepSeek-R1-Distill-Qwen-7B | 0.2069 | 0.2178 |
-
-A single in-context example moved Qwen3.5-4B's Sinhala accuracy from 0.6207 to 0.7673 (+15.7pts) — a large, cheap effect that was never stacked with the fine-tuning work in this report. Flagged as a potential lever (§13) but not pursued given compute constraints.
-
-### 2d. Fine-tuning baseline comparison (Codabench, hidden test)
-
-| Model | Strategy | chinese | indonesian | srilankan | avg |
-|---|---|---|---|---|---|
-| google/gemma-4-E4B-it | baseline | 0.5016 | 0.6485 | 0.9235 | 0.6912 |
-| google/gemma-4-E4B-it | LoRA (separate adapters/lang) | 0.4844 | 0.6104 | 0.8959 | 0.6635 |
-| Qwen/Qwen3.5-4b | baseline | 0.5694 | 0.6668 | 0.8243 | 0.6869 |
-| MERaLiON-LLaMA-3-8B-Instruct | baseline | 0.3171 | 0.6376 | 0.6424 | 0.5323 |
-
-Gemma-4-E4B-it got *worse* on every language after LoRA fine-tuning (0.6912 → 0.6635) — unexplained, never root-caused, not investigated further since the team standardized on Qwen3.5-4B.
-
-## 3. Best-known original strategy: sequential curriculum (0.8044, superseded by §6 v5)
-
-Ad-hoc recipe, developed by trial and error, **never implemented as a reusable local script — only ever run in Colab/Drive** — until this session's curriculum-mode addition (§6). The checkpoint itself no longer exists anywhere retrievable.
+Ad-hoc recipe, developed by trial and error, **never implemented as a reusable local script — only ever run in Colab/Drive** — until this session's curriculum-mode addition (§5). The checkpoint itself no longer exists anywhere retrievable.
 
 | Stage | chinese | indonesian | srilankan | avg |
 |---|---|---|---|---|
@@ -87,11 +32,11 @@ Ad-hoc recipe, developed by trial and error, **never implemented as a reusable l
 | + aug-sinhala | 0.7725 | 0.7084 | 0.9284 | 0.8031 |
 | + aug-chinese | 0.7763 | 0.7084 | 0.9284 | 0.8044 |
 
-Each stage continues from the prior stage's checkpoint. "Augmented" stages used literal duplicated training rows with permuted option positions (an idea proposed in the team's original findings doc, quoted in §4 Mechanism B) — a data-augmentation trick, not a training-time loss term. No hyperparameters (learning rate, epochs, LoRA rank, batch size) were ever recorded for this recipe.
+Each stage continues from the prior stage's checkpoint. "Augmented" stages used literal duplicated training rows with permuted option positions (an idea proposed in the team's original findings doc, quoted in §3 Mechanism B) — a data-augmentation trick, not a training-time loss term. No hyperparameters (learning rate, epochs, LoRA rank, batch size) were ever recorded for this recipe.
 
-Also tried on the old `train_macro_lora_pt.py` (simultaneous, not curriculum) pipeline: 0.7501 avg (chinese=0.7196, indonesian=0.6512, srilankan=0.8795) — this used the *old*, buggy `prepare_training_data.py` that dropped tied-vote Indonesian rows entirely instead of keeping them (fixed later, §10, but that fix was never re-measured against this exact simultaneous pipeline — the team moved to the novel methodology instead).
+Also tried on the old `train_macro_lora_pt.py` (simultaneous, not curriculum) pipeline: 0.7501 avg (chinese=0.7196, indonesian=0.6512, srilankan=0.8795) — this used the *old*, buggy `prepare_training_data.py` that dropped tied-vote Indonesian rows entirely instead of keeping them (fixed later, §9, but that fix was never re-measured against this exact simultaneous pipeline — the team moved to the novel methodology instead).
 
-## 4. Novel methodology design
+## 3. Novel methodology design
 
 Two mechanisms, grounded in this dataset's actual structure rather than generic architecture tweaks (`scripts/novel_data.py`, `scripts/train_novel.py`).
 
@@ -120,7 +65,7 @@ def soft_ce_at_answer_position(logits_shifted, labels_shifted, target_dist_batch
     log_probs = F.log_softmax(logits_at_pos, dim=-1)
     letter_log_probs = log_probs[:, letter_ids]  # (B, 4), columns A,B,C,D
     loss = -(target_dist_batch * letter_log_probs).sum(dim=1).mean()
-    metric = (target_dist_batch * letter_log_probs.exp()).sum(dim=1).mean()  # continuous metric, §4c
+    metric = (target_dist_batch * letter_log_probs.exp()).sum(dim=1).mean()  # continuous metric, §3c
     return loss, metric, logits_at_pos
 ```
 
@@ -156,7 +101,7 @@ def consistency_loss(logits_at_pos_orig, logits_at_pos_perm, perm_idx, letter_id
 lang_loss = 0.5*(loss_orig + loss_perm) + consistency_lambda * consistency_loss(...)
 ```
 
-`--consistency-lambda` (default 0.5) is a swept hyperparameter (§5). Verified: feeding the same example as both "original" and "permuted with the identity permutation" gives `consistency_loss ≈ 0` (`verify_novel.py` check 7). Added cost: one extra forward+backward per step (~1.6-2x wall-clock vs. plain CE).
+`--consistency-lambda` (default 0.5) is a swept hyperparameter (§4). Verified: feeding the same example as both "original" and "permuted with the identity permutation" gives `consistency_loss ≈ 0` (`verify_novel.py` check 7). Added cost: one extra forward+backward per step (~1.6-2x wall-clock vs. plain CE).
 
 ### 4c. CV + refit protocol (solves problem #1)
 
@@ -175,23 +120,23 @@ One-axis-at-a-time from a base config (Mac tier cuts CV to k=3 or single-split, 
 
 | # | Label | Target | Consistency-reg | Data protocol | Purpose | Status |
 |---|---|---|---|---|---|---|
-| 1 | Baseline control | hard (collapse+dup) | off | single split | reproduces old architecture | not run as a standalone config (superseded by §3's real 0.7501 result) |
+| 1 | Baseline control | hard (collapse+dup) | off | single split | reproduces old architecture | not run as a standalone config (superseded by §2's real 0.7501 result) |
 | 2 | +CV/refit only | hard | off | k-fold CV + refit | isolates data-protocol contribution | not run |
 | 3 | +Soft-label only | soft | off | single split | isolates Mechanism A | not run |
 | 4 | +Consistency only | hard | on | single split | isolates Mechanism B | not run |
 | 5 | +Soft+Consistency | soft | on | single split | A+B interaction, no CV | not run |
-| 6 | Full (original headline) | soft | on | k-fold CV + refit | main claimed result | **run, §5** |
-| 7a-c | λ sweep | soft | on, λ∈{0.25,0.5,1.0} | single split | justifies λ | **partially run** (0.5, 0.6 only, §5) |
-| 8 | Dev/test gap table | configs 1 & 6 | — | actual Codabench scores | substantiates the mismatch-fix claim | partially available via §2d/§5 |
+| 6 | Full (original headline) | soft | on | k-fold CV + refit | main claimed result | **run, §4** |
+| 7a-c | λ sweep | soft | on, λ∈{0.25,0.5,1.0} | single split | justifies λ | **partially run** (0.5, 0.6 only, §4) |
+| 8 | Dev/test gap table | configs 1 & 6 | — | actual Codabench scores | substantiates the mismatch-fix claim | partially available via §4 |
 
-Most individual-mechanism ablations (2-5) were never run in isolation — compute went toward the curriculum-combination direction (§6) instead once it proved more promising.
+Most individual-mechanism ablations (2-5) were never run in isolation — compute went toward the curriculum-combination direction (§5) instead once it proved more promising.
 
-## 5. Novel-methodology results (simultaneous training, pre-curriculum)
+## 4. Novel-methodology results (simultaneous training, pre-curriculum)
 
 | Config | chinese | indonesian | srilankan | avg | notes |
 |---|---|---|---|---|---|
-| Simultaneous macro training (pre-fix), `train_macro_lora_pt.py` | 0.7196 | 0.6512 | 0.8795 | 0.7501 | old hard-label pipeline, tied Indonesian rows dropped (§3) |
-| **Soft-label + consistency (λ=0.5), `train_novel.py --final-refit --refit-iters 25`** | 0.7442 | 0.6941 | 0.9197 | 0.7860 | `refit_iters=25` is CV-validated (median `best_iter` across a real 5-fold sweep), not a guess — confirmed twice after initial mis-attribution (§12) |
+| Simultaneous macro training (pre-fix), `train_macro_lora_pt.py` | 0.7196 | 0.6512 | 0.8795 | 0.7501 | old hard-label pipeline, tied Indonesian rows dropped (§2) |
+| **Soft-label + consistency (λ=0.5), `train_novel.py --final-refit --refit-iters 25`** | 0.7442 | 0.6941 | 0.9197 | 0.7860 | `refit_iters=25` is CV-validated (median `best_iter` across a real 5-fold sweep), not a guess — confirmed twice after initial mis-attribution (§11) |
 | Soft-label + consistency (λ=0.6), `--refit-iters 50` | 0.7676 | 0.6975 | 0.8871 | 0.7841 | **confounded**: both λ and iters changed vs. the row above, so the per-language shift (zh +2.3, id +0.3, si -3.3) can't be attributed to λ alone |
 | Soft-label + consistency (λ=0.6), refit_iters=CV-determined | 0.7489 | 0.7003 | 0.9097 | 0.7863 | clean, isolated comparison — same iters-selection method as the λ=0.5 row. **λ barely matters in the 0.5-0.6 range** (0.7860 vs 0.7863, within noise) |
 
@@ -205,11 +150,11 @@ Most individual-mechanism ablations (2-5) were never run in isolation — comput
 | 3 | 15 | — | — | — |
 | 4 | 25 | — | — | — |
 
-`median_best_iter=25`, used as `suggested_refit_iters`. The 4x spread in `best_iter` (15-60) was initially treated as possible small-dataset noise, deprioritized for a learning-rate sweep given compute constraints — later (§6 v5) confirmed to be a real too-aggressive-default-LR signal, not noise, once a lower LR was actually tested.
+`median_best_iter=25`, used as `suggested_refit_iters`. The 4x spread in `best_iter` (15-60) was initially treated as possible small-dataset noise, deprioritized for a learning-rate sweep given compute constraints — later (§5 v5) confirmed to be a real too-aggressive-default-LR signal, not noise, once a lower LR was actually tested.
 
-## 6. Curriculum + novel mechanisms
+## 5. Curriculum + novel mechanisms
 
-Every result in §5 tested the new mechanisms only under *simultaneous* training (all 3 languages every step, fresh from base). Curriculum ordering (§3) was independently the strongest lever found (+~1.8-2pts over every simultaneous variant) but had never been combined with the new mechanisms — the most-supported untested hypothesis, and the cheapest real experiment left given limited remaining compute at the time (no checkpoint existed to ensemble with the original 0.8044 recipe, ruling that out; a learning-rate sweep on the simultaneous script would have cost 15+ full CV runs for a hypothesis with no direct evidence yet).
+Every result in §4 tested the new mechanisms only under *simultaneous* training (all 3 languages every step, fresh from base). Curriculum ordering (§2) was independently the strongest lever found (+~1.8-2pts over every simultaneous variant) but had never been combined with the new mechanisms — the most-supported untested hypothesis, and the cheapest real experiment left given limited remaining compute at the time (no checkpoint existed to ensemble with the original 0.8044 recipe, ruling that out; a learning-rate sweep on the simultaneous script would have cost 15+ full CV runs for a hypothesis with no direct evidence yet).
 
 New script: **`scripts/train_novel_curriculum.py`**, reusing `train_novel.py`'s tokenization/loss/step functions directly (`letter_token_ids`, `SoftPromptCompletionDataset`, `build_lang_examples`, `lang_step`) rather than reimplementing them, and `train_sft_then_grpo.py`'s checkpoint-continuation pattern:
 
@@ -225,7 +170,7 @@ else:
 Design decisions confirmed with the user before implementation:
 - **New-language-only per stage** (not cumulative replay of prior languages) — matches the memory record's description of the original recipe ("each stage mostly moves only the newly-added language, almost no forgetting") and is cheaper.
 - **`--consistency-lambda` applied uniformly at every stage** (not just the aug-stages the way the original recipe's row-duplication augmentation was) — replaces the old ad-hoc idea with the actual novel mechanism; this is the hypothesis under test, not a replication.
-- **Fixed `--iters-per-stage` (default 25, the CV-validated count from §5), no per-stage CV/early-stopping** — kept to a single run given limited compute.
+- **Fixed `--iters-per-stage` (default 25, the CV-validated count from §4), no per-stage CV/early-stopping** — kept to a single run given limited compute.
 
 Checkpoint-continuation logic was verified correct via a fast, targeted unit check *before* committing to a real (slow) training run: perturbed a `lora_B` weight (normally zero-initialized) by adding 1.0, saved the adapter, reloaded it fresh via `PeftModel.from_pretrained(..., is_trainable=True)` on a newly-loaded base model, and confirmed the reloaded value matched the perturbation exactly (`torch.allclose`) rather than being silently reinitialized to zero. Ran in under 30 seconds (no actual training involved) after an initial full smoke test proved too slow for the user's open (billed) cloud instance to wait on.
 
@@ -233,20 +178,20 @@ Checkpoint-continuation logic was verified correct via a fast, targeted unit che
 
 Recipe: **zh → id → aug-si → aug-zh**, each stage continuing from the prior stage's adapter, training only on that stage's own language. 25 fixed iterations/stage.
 
-**Result: 0.7799 avg (chinese=0.7654, indonesian=0.6683, srilankan=0.9059) — underperforms both references.** Below both the simultaneous novel-methodology results (0.7860-0.7863, §5) and well below the original curriculum (0.8044). Confirmed via cloud training logs that all 4 stages genuinely completed all 25/25 iterations (not a truncated/broken run — `predict_test.py` requires the final stage's adapter to exist at all, and it processed all 5475 test rows with 0 unparseable) before drawing this conclusion — the user explicitly asked "are you sure this trained correctly" given the suspiciously short training wall-clock time (~6.6 minutes for all 4 stages combined on the cloud GPU), which turned out to be genuine GPU speed, not skipped work.
+**Result: 0.7799 avg (chinese=0.7654, indonesian=0.6683, srilankan=0.9059) — underperforms both references.** Below both the simultaneous novel-methodology results (0.7860-0.7863, §4) and well below the original curriculum (0.8044). Confirmed via cloud training logs that all 4 stages genuinely completed all 25/25 iterations (not a truncated/broken run — `predict_test.py` requires the final stage's adapter to exist at all, and it processed all 5475 test rows with 0 unparseable) before drawing this conclusion — the user explicitly asked "are you sure this trained correctly" given the suspiciously short training wall-clock time (~6.6 minutes for all 4 stages combined on the cloud GPU), which turned out to be genuine GPU speed, not skipped work.
 
 Indonesian scored its worst across every novel-methodology attempt (0.6683). Working hypothesis: in this new-language-only, no-cumulative-replay schedule, Indonesian is trained once in stage 1 and never revisited, while Chinese is trained first *and* last (stage 3). If the new soft-label+consistency loss causes even mild catastrophic forgetting between stages — unlike the original recipe's plain hard-label CE, described in the memory record as having "almost no forgetting" — Indonesian is the language most exposed to it, having two full subsequent stages with none of its own data before the run ends.
 
-**Real infrastructure bug found from this run's cloud logs**: recurring (non-fatal) CUDA OOM warnings throughout every stage — PyTorch's allocator retried and recovered each time, but GPU free memory was repeatedly dropping under 1GB on a 31.4GB card before every retry. `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` had only ever been added to the earlier Colab notebook during T4-OOM debugging, never ported to `train_novel.py` or `train_novel_curriculum.py` — same class of gap as other notebook-vs-script mismatches found this session (§10). Fixed post-hoc in both scripts; didn't invalidate the v1 result (training completed correctly) but reduced risk of a harder failure on future runs.
+**Real infrastructure bug found from this run's cloud logs**: recurring (non-fatal) CUDA OOM warnings throughout every stage — PyTorch's allocator retried and recovered each time, but GPU free memory was repeatedly dropping under 1GB on a 31.4GB card before every retry. `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` had only ever been added to the earlier Colab notebook during T4-OOM debugging, never ported to `train_novel.py` or `train_novel_curriculum.py` — same class of gap as other notebook-vs-script mismatches found this session (§9). Fixed post-hoc in both scripts; didn't invalidate the v1 result (training completed correctly) but reduced risk of a harder failure on future runs.
 
 ### v2: Indonesian revisit + Chinese-weighted combined stage — first real progress
 
 Two follow-ups to v1's failure, combined into one run per the user's explicit request ("can we do both at the same time... combining"):
 
 1. **`--stages zh,id,si,zh,id`** — Indonesian revisited too (`STAGES` made configurable via a new `--stages` CLI flag, comma-separated), testing the forgetting hypothesis directly.
-2. **`--final-combined-iters 25 --zh-weight 1.5`** — one more stage after the curriculum, switching back to *simultaneous* training across all 3 languages (same mechanism as §5's `train_novel.py`) with zh's loss upweighted 1.5x before averaging.
+2. **`--final-combined-iters 25 --zh-weight 1.5`** — one more stage after the curriculum, switching back to *simultaneous* training across all 3 languages (same mechanism as §4's `train_novel.py`) with zh's loss upweighted 1.5x before averaging.
 
-**Why weight Chinese specifically?** Comparing the original sequential-curriculum recipe (§3) against simultaneous training (§5) language-by-language shows Chinese with a disproportionately large gap: sequential curriculum beat simultaneous training by +3.2pts on Chinese, vs. only +1.4pts on Indonesian and +0.9pts on Sri Lankan. Likely explanation: the original recipe trains Chinese *twice* (it's both the first stage and the last, "aug-chinese"), while Indonesian and Sri Lankan each train only once — so Chinese simply gets more total exposure, not necessarily an ordering effect specific to Chinese. Since v2 was already adding a stage where all three languages train together (to fix the Indonesian-forgetting problem), upweighting Chinese's loss there was a cheap way to test the extra-exposure hypothesis without needing a whole separate Chinese-only stage.
+**Why weight Chinese specifically?** Comparing the original sequential-curriculum recipe (§2) against simultaneous training (§4) language-by-language shows Chinese with a disproportionately large gap: sequential curriculum beat simultaneous training by +3.2pts on Chinese, vs. only +1.4pts on Indonesian and +0.9pts on Sri Lankan. Likely explanation: the original recipe trains Chinese *twice* (it's both the first stage and the last, "aug-chinese"), while Indonesian and Sri Lankan each train only once — so Chinese simply gets more total exposure, not necessarily an ordering effect specific to Chinese. Since v2 was already adding a stage where all three languages train together (to fix the Indonesian-forgetting problem), upweighting Chinese's loss there was a cheap way to test the extra-exposure hypothesis without needing a whole separate Chinese-only stage.
 
 This is the curriculum-mode analog of "oversampling" Chinese — per-step batch weighting (the literal meaning of oversampling in a simultaneous-training context) doesn't translate to sequential single-language stages, so loss reweighting in the final combined stage was chosen instead (an explicit AskUserQuestion decision — the alternative considered was a bigger per-step batch for zh specifically, within that same combined stage).
 
@@ -270,44 +215,44 @@ Other single-axis guess: keep `--final-combined-iters 25` (back to what worked),
 
 ### v5: lower learning rate — NEW BEST, beats the all-time record
 
-Third single-axis guess off v2: keep `--final-combined-iters 25 --zh-weight 1.5`, lower the combined stage's `--learning-rate` from the default 1e-4 to 5e-5. Motivated by the old CV fold-variance signal (§5: `best_iter` varied 15-60 across folds, a 4x spread), which hinted the default LR might converge a bit too fast/unstably for this dataset size — a hypothesis that had been explicitly deprioritized earlier due to compute cost, then revisited here.
+Third single-axis guess off v2: keep `--final-combined-iters 25 --zh-weight 1.5`, lower the combined stage's `--learning-rate` from the default 1e-4 to 5e-5. Motivated by the old CV fold-variance signal (§4: `best_iter` varied 15-60 across folds, a 4x spread), which hinted the default LR might converge a bit too fast/unstably for this dataset size — a hypothesis that had been explicitly deprioritized earlier due to compute cost, then revisited here.
 
 Methodological caveat raised and discussed *before* running: testing a lower LR at the *same* iteration budget confounds "worse LR" with "just undertrained" if the result comes back worse (lower LR normally needs *more* steps to converge). Bumping iterations to compensate wasn't a safe fix either, since v3 had just proven more iterations distorts the per-language balance (toward Sri Lankan). Resolution: pre-register the interpretation before running — a worse result would be inconclusive either way, but a *better* result despite the same-or-worse effective convergence budget would be a genuinely strong signal, not an artifact.
 
 **Result: 0.8062 avg (chinese=0.7788, indonesian=0.7139, srilankan=0.9260) — beats v2 on all three languages simultaneously, and beats the all-time-best 0.8044.** First result, from any strategy tried (novel or the original ad-hoc recipe), to exceed 0.8044. Per the pre-registered interpretation: since this improved despite a lower LR at the same iteration count (normally a disadvantage), it's strong evidence the default `lr=1e-4` really was too aggressive for this recipe/dataset, confirming the old CV fold-variance signal was real, not noise.
 
-**Caveat / untested follow-up:** v5 only changed the learning rate of the *final combined stage* (via `--resume-from`, reusing v2's already-trained `stage_4_id` checkpoint) — the 5 curriculum stages before it were still trained at the original `lr=1e-4`. A full recipe rerun at the lower LR throughout (not just the last stage) is an untested, bigger-compute follow-up if further gains are wanted (§13) — attempted next, see v6.
+**Caveat / untested follow-up:** v5 only changed the learning rate of the *final combined stage* (via `--resume-from`, reusing v2's already-trained `stage_4_id` checkpoint) — the 5 curriculum stages before it were still trained at the original `lr=1e-4`. A full recipe rerun at the lower LR throughout (not just the last stage) is an untested, bigger-compute follow-up if further gains are wanted (§12) — attempted next, see v6.
 
 ### v6: full per-stage CV+refit, lr=5e-5 throughout — more rigorous, but worse
 
-With more compute available, the natural next step was to stop borrowing iteration counts and actually validate them — for every stage, at the new learning rate, not just reuse `iters=25` (itself borrowed from an unrelated λ=0.5 simultaneous-training sweep, §5) under the assumption it would still be right at a different LR and a different training structure.
+With more compute available, the natural next step was to stop borrowing iteration counts and actually validate them — for every stage, at the new learning rate, not just reuse `iters=25` (itself borrowed from an unrelated λ=0.5 simultaneous-training sweep, §4) under the assumption it would still be right at a different LR and a different training structure.
 
-**Explicit user constraint: do not modify `train_novel_curriculum.py` or any other existing script** — v5 had already produced the best result and needed to stay exactly reproducible regardless of what this experiment did. A naive fix (hold out a fixed ~15% validation split per stage) was considered and explicitly rejected: the per-language datasets are already small, and a single small fixed split both wastes irreplaceable training data (§4c's original motivation) and gives too noisy a read to trust, especially for Sri Lankan.
+**Explicit user constraint: do not modify `train_novel_curriculum.py` or any other existing script** — v5 had already produced the best result and needed to stay exactly reproducible regardless of what this experiment did. A naive fix (hold out a fixed ~15% validation split per stage) was considered and explicitly rejected: the per-language datasets are already small, and a single small fixed split both wastes irreplaceable training data (§3c's original motivation) and gives too noisy a read to trust, especially for Sri Lankan.
 
-New, separate script: **`scripts/train_novel_curriculum_cv.py`** (imports from `train_novel.py`, `novel_data.py`, `eval_baseline.py`, `train_macro_lora_pt.py` — modifies none of them). For each of the 6 stages, in the exact order v5 used (zh, id, si, zh, id, combined): real k-fold CV (k=5), continuing from the *fixed* adapter the previous stage's refit produced, to find that stage's own validated `best_iter` — training only, no data permanently sacrificed, since every row gets a turn in validation across the folds, same principle as §4c's original protocol, just applied per-stage instead of once. Then a refit on 100% of that stage's data for the validated count, chained to the next stage. `--learning-rate 5e-5` applied to every stage this time, not just the combined one. Checkpoint continuation re-verified with the same fast targeted check used for `train_novel_curriculum.py` (perturbed LoRA weight survives a save/reload cycle unchanged) before trusting a real run.
+New, separate script: **`scripts/train_novel_curriculum_cv.py`** (imports from `train_novel.py`, `novel_data.py`, `eval_baseline.py`, `train_macro_lora_pt.py` — modifies none of them). For each of the 6 stages, in the exact order v5 used (zh, id, si, zh, id, combined): real k-fold CV (k=5), continuing from the *fixed* adapter the previous stage's refit produced, to find that stage's own validated `best_iter` — training only, no data permanently sacrificed, since every row gets a turn in validation across the folds, same principle as §3c's original protocol, just applied per-stage instead of once. Then a refit on 100% of that stage's data for the validated count, chained to the next stage. `--learning-rate 5e-5` applied to every stage this time, not just the combined one. Checkpoint continuation re-verified with the same fast targeted check used for `train_novel_curriculum.py` (perturbed LoRA weight survives a save/reload cycle unchanged) before trusting a real run.
 
 **Result: 0.7911 avg (chinese=0.7710, indonesian=0.7003, srilankan=0.9021) — worse than v5 (0.8062) by 1.51 points, despite far more methodological rigor.** Does not unseat v5 as the recommended submission.
 
-Leading hypothesis for the regression: v5's `lr=5e-5` was only ever validated as an improvement for the *final* combined stage specifically — fine-tuning an already curriculum-adapted model, where gentler updates plausibly help. Applying the same lower LR to the *early* curriculum stages (especially stage 0, training fresh from base) may have been actively wrong, if those stages need the higher LR to make meaningful progress in a small number of steps. This fits a pattern visible across v3, v4, and now v6: every "principled, reasoned" change beyond what was specifically empirically found (more iterations, a different zh-weight, now a uniformly lower LR) has underperformed the exact combination that testing actually validated — extending a finding by analogy to a context it wasn't tested in isn't a safe assumption here, even when the reasoning sounds sound. A second, structural possibility: chaining 6 independently-CV-optimized stages doesn't guarantee a globally coherent result — each stage's locally-best checkpoint isn't necessarily the best *starting point* for the next stage's own optimization, and per-stage CV noise (fold `best_iter` had already shown a 4x spread in the original §5 sweep) can compound across 6 chained stages rather than average out.
+Leading hypothesis for the regression: v5's `lr=5e-5` was only ever validated as an improvement for the *final* combined stage specifically — fine-tuning an already curriculum-adapted model, where gentler updates plausibly help. Applying the same lower LR to the *early* curriculum stages (especially stage 0, training fresh from base) may have been actively wrong, if those stages need the higher LR to make meaningful progress in a small number of steps. This fits a pattern visible across v3, v4, and now v6: every "principled, reasoned" change beyond what was specifically empirically found (more iterations, a different zh-weight, now a uniformly lower LR) has underperformed the exact combination that testing actually validated — extending a finding by analogy to a context it wasn't tested in isn't a safe assumption here, even when the reasoning sounds sound. A second, structural possibility: chaining 6 independently-CV-optimized stages doesn't guarantee a globally coherent result — each stage's locally-best checkpoint isn't necessarily the best *starting point* for the next stage's own optimization, and per-stage CV noise (fold `best_iter` had already shown a 4x spread in the original §4 sweep) can compound across 6 chained stages rather than average out.
 
-## 7. Curriculum results at a glance
+## 6. Curriculum results at a glance
 
 | Version | Stages | Combined stage | chinese | indonesian | srilankan | avg | vs. previous best |
 |---|---|---|---|---|---|---|---|
-| v1 | zh,id,si,zh | none | 0.7654 | 0.6683 | 0.9059 | 0.7799 | worse than 0.7860 (§5) |
+| v1 | zh,id,si,zh | none | 0.7654 | 0.6683 | 0.9059 | 0.7799 | worse than 0.7860 (§4) |
 | v2 | zh,id,si,zh,id | iters=25, zh-weight=1.5, lr=1e-4 | 0.7757 | 0.7030 | 0.9235 | 0.8007 | best so far, -0.37 from 0.8044 |
 | v3 | zh,id,si,zh,id | iters=40, zh-weight=1.5, lr=1e-4 | 0.7586 | 0.6975 | 0.9398 | 0.7986 | worse than v2 |
 | v4 | zh,id,si,zh,id | iters=25, zh-weight=1.3, lr=1e-4 | 0.7757 | 0.7003 | 0.9247 | 0.8002 | tied with v2 |
 | **v5** | zh,id,si,zh,id | iters=25, zh-weight=1.5, **lr=5e-5** | 0.7788 | 0.7139 | 0.9260 | **0.8062** | **BEST, beats 0.8044 — submit this one** |
 | v6 (`train_novel_curriculum_cv.py`) | zh,id,si,zh,id | CV-validated iters, zh-weight=1.5, **lr=5e-5 all stages** | 0.7710 | 0.7003 | 0.9021 | 0.7911 | worse than v5, despite more rigor |
 
-## 8. `train_novel_curriculum.py` CLI reference (final state)
+## 7. `train_novel_curriculum.py` CLI reference (final state)
 
 `--model-id`, `--seed`, `--max-seq-length`(768), `--lora-rank`(16), `--lora-alpha`(32.0), `--grad-checkpoint`/`--no-grad-checkpoint`, `--max-grad-norm`(1.0), `--consistency-lambda`(0.5, applied every stage), `--hard-labels` (ablation control), `--per-lang-batch-size`(8), `--iters-per-stage`(25), `--stages`(default `"zh,id,si,zh,id"`, comma-separated, validated against `LANGS`), `--final-combined-iters`(0 = disabled), `--zh-weight`(1.5, only used if the combined stage runs), `--resume-from`(path to an existing stage adapter, skips straight to the combined stage — requires `--final-combined-iters > 0` and the path to exist, both validated with a clear `ap.error`), `--steps-per-report`(5), `--learning-rate`(1e-4), `--out-dir`(default `results/novel_curriculum`).
 
 Per-stage adapters are always saved individually (`{out_dir}/stage_{i}_{lang}/adapter`, or `stage_{i}_combined/adapter` for the final stage) — not just the final checkpoint — which is what made `--resume-from` possible to add later without re-architecting anything.
 
-## 9. Command reference for the winning (v5) recipe
+## 8. Command reference for the winning (v5) recipe
 
 Full path to v5 from a clean clone, in the order actually used across this session (later runs reused earlier checkpoints via `--resume-from` rather than rerunning everything each time):
 
@@ -333,7 +278,7 @@ python3 scripts/predict_test.py \
   --out results/test_submission_curriculum_v5.jsonl
 ```
 
-### 9b. `train_novel_curriculum_cv.py` (v6, worse than v5 — see §6) CLI reference and commands
+### 8b. `train_novel_curriculum_cv.py` (v6, worse than v5 — see §5) CLI reference and commands
 
 Separate script, modifies nothing else. CLI: `--model-id`, `--seed`, `--fold-seed`, `--max-seq-length`(768), `--lora-rank`(16), `--lora-alpha`(32.0), `--grad-checkpoint`/`--no-grad-checkpoint`, `--max-grad-norm`(1.0), `--consistency-lambda`(0.5), `--zh-weight`(1.5, combined slot only), `--hard-labels`, `--per-lang-batch-size`(8), `--cv-folds`(5), `--cv-iters-ceiling`(300, the per-fold ceiling before early stopping must have fired), `--steps-per-eval`(5), `--steps-per-report`(5), `--val-batches`(10), `--patience`(5), `--learning-rate`(**5e-5 default** — deliberately different from `train_novel_curriculum.py`'s 1e-4 default, since the whole point of this script was testing the lower LR throughout), `--resume-from-slot`(0, resumes from `{out-dir}/slot_{N-1}_*/adapter`, validated to exist), `--out-dir`(default `results/novel_curriculum_cv`).
 
@@ -348,7 +293,7 @@ python3 scripts/predict_test.py \
   --out results/test_submission_curriculum_cv.jsonl
 ```
 
-## 10. Bugs found and fixed this session
+## 9. Bugs found and fixed this session
 
 All found and fixed as part of this same body of work, roughly chronological:
 
@@ -364,43 +309,43 @@ All found and fixed as part of this same body of work, roughly chronological:
 10. **`--load-in-4bit` never ported to `train_novel.py`** either, only the notebook — ported for parity (not load-bearing for any result in this report, since cloud runs used large-enough GPUs, but available as a fallback).
 11. **Checkpoint-continuation correctness** (`train_novel_curriculum.py`, new code, not a fix to existing code but flagged as the single most likely place for a silent bug given it was new and untested) — verified via a fast targeted check before trusting any real curriculum run: perturbed a LoRA weight, saved, reloaded fresh via `PeftModel.from_pretrained(..., is_trainable=True)`, confirmed exact match rather than silent reinitialization to the framework's zero-init default.
 
-## 11. Repository cleanup
+## 10. Repository cleanup
 
 Done alongside the modeling work, at the user's request ("we need to clean up the repo first" before moving training to a cloud instance):
 
 - **`.git` history: 8.9GB → 81MB.** Root cause: three orphaned `tmp_pack_*` files (totaling 8.8GB) sitting in `.git/objects/pack/`, leftover from an old interrupted git operation (likely a past attempt to commit the 8.2GB `models/` directory before it was gitignored). Confirmed via `git count-objects -v` (flagged as garbage), file timestamps (3 days stale), no active git process/lock files, and `git fsck` before deleting — then `git gc --prune=now`.
 - **`.DS_Store` and a Word lock file (`data/~$adme.md.docx`)** had both been accidentally committed to git history — untracked via `git rm --cached` and added to `.gitignore` (`.DS_Store`, `~$*`, and `__pycache__/` also added; `venv/` corrected to `.venv/` to match the actual local environment name).
-- **8.2GB of cached baseline model weights** (`models/meralion-llama3-8b-4bit`, `models/seallms-v3-7b-4bit`) deleted from local disk at the user's request — already gitignored (not a git-history issue), just local clutter from earlier baseline comparisons (§2d), re-downloadable from Hugging Face if ever needed again.
+- **8.2GB of cached baseline model weights** (`models/meralion-llama3-8b-4bit`, `models/seallms-v3-7b-4bit`) deleted from local disk at the user's request — already gitignored (not a git-history issue), just local clutter from earlier baseline comparisons, re-downloadable from Hugging Face if ever needed again.
 - Two genuinely empty leftover directories removed (`adapters/macro_lora_pt_continued`, `results/novel_cv/round_0` — the latter traced back to an earlier accidental real-training-run incident during notebook validation, caught and killed within seconds at the time).
 - Four logically-grouped commits made for previously-uncommitted work: (1) the junk-tracking cleanup itself, (2) pending fixes (`eval_baseline.py`'s `resolve_gold_candidates` split, `prepare_training_data.py`'s tie-row-keeping fix, `train_macro_lora_pt.py`'s grad-norm clipping, regenerated `data/{train,val}/*.jsonl`), (3) the novel-methodology files (`novel_data.py`, `train_novel.py`, `run_cv.py`, `verify_novel*.py`, the Colab notebook), (4) the GRPO pipeline + predict-test notebook + findings doc + local val results.
 
-## 12. Provenance corrections (kept as a record of what actually happened)
+## 11. Provenance corrections (kept as a record of what actually happened)
 
 Several results in this project's memory/reporting got mis-attributed initially and were corrected once clarified — kept here rather than silently smoothed over, since it affects how much to trust similar unconfirmed details elsewhere:
 
 - The 0.7860 result (λ=0.5) was first mis-attributed to `train_macro_lora_pt.py` (the old simultaneous script), then correctly identified as `train_novel.py --final-refit --refit-iters 25` (the new soft-label+consistency script).
 - `refit_iters=25` was initially assumed to be an unjustified guess "borrowed" from an unrelated run, then confirmed to actually be `run_cv.py`'s own genuine k-fold-CV-determined `suggested_refit_iters` (median `best_iter` across a real 5-fold sweep) — a legitimately validated number, not a guess, on the second correction.
 - The λ=0.6/`refit-iters=50` run's iteration count was never confirmed by the user as CV-derived or hand-picked — logged with that caveat explicitly rather than guessing either way.
-- The curriculum v1 checkpoint's unusually short training wall-clock time (~6.6 min for all 4 stages) prompted a direct "are you sure this trained correctly" challenge from the user — resolved with concrete evidence (all stages logged `25/25` completion, `predict_test.py` processed all 5475 rows without error) rather than just asserting it was fine, and in the process of checking, a real bug (#9 in §10) was found anyway.
+- The curriculum v1 checkpoint's unusually short training wall-clock time (~6.6 min for all 4 stages) prompted a direct "are you sure this trained correctly" challenge from the user — resolved with concrete evidence (all stages logged `25/25` completion, `predict_test.py` processed all 5475 rows without error) rather than just asserting it was fine, and in the process of checking, a real bug (#9 in §9) was found anyway.
 
-## 13. Key findings
+## 12. Key findings
 
 - **Indonesian was the macro-average's weak link across every strategy tried for most of this work** — never above ~0.71 in any fine-tuned or baseline configuration, until curriculum v5's 0.7139 (still lower than zh/si in absolute terms, but the best id score ever recorded here).
 - **Sequential curriculum's edge over simultaneous training was concentrated in Chinese** (+3.2pts vs. simultaneous macro, post-data-fix), not Indonesian (+1.4pts) or Sri Lankan (+0.9pts) — confirmed by v2's combined-stage experiment that Chinese-specific exposure (not just curriculum ordering in the abstract) explains real part of that gap.
-- **consistency-lambda doesn't meaningfully move the macro average in the 0.5-0.6 range** (§5) — but **learning rate does matter** (§6 v5) — not every hyperparameter in this pipeline is equally sensitive, and it wasn't obvious in advance which would turn out to matter.
+- **consistency-lambda doesn't meaningfully move the macro average in the 0.5-0.6 range** (§4) — but **learning rate does matter** (§5 v5) — not every hyperparameter in this pipeline is equally sensitive, and it wasn't obvious in advance which would turn out to matter.
 - **"More training" is not a free lever on this dataset size** — curriculum v3 showed more combined-stage iterations shifts the model toward whichever language has the smallest dataset (Sri Lankan, 203 rows) due to replacement-sampling dynamics, not uniform improvement.
 - **CV fold-to-fold variance in `best_iter` (15-60, a 4x spread) turned out to be a real too-aggressive-LR signal for the combined stage specifically**, not just small-dataset noise — confirmed once a lower LR was tested there and it improved every language (v5). But that finding did NOT generalize to the rest of the recipe: applying the same lower LR to the early curriculum stages too (v6, full per-stage CV+refit) made things worse, not better (0.7911 < 0.8062) — a hyperparameter finding validated in one specific context (fine-tuning an already-adapted model) isn't safe to extend by analogy to a different context (training fresh from base) without testing it there too.
 - **More methodological rigor doesn't automatically mean a better result.** v6 replaced every borrowed iteration count with a genuinely CV-validated one, at real (non-trivial) extra compute cost, and still underperformed v5's simpler, partly-empirical recipe. This is the third time this pattern showed up (after v3 and v4) — every "principled" single-axis extension beyond what was specifically tested has lost to the exact combination that testing found, across this entire curriculum-tuning arc.
 - **The `prepare_training_data.py` fix** (tied-vote Indonesian rows kept instead of dropped) improved the *old* simultaneous-macro pipeline's reported number by inference (0.7501 pre-fix) but was never actually re-measured with that fix applied — the pipeline that eventually beat the old best was the *novel* methodology, which never used `prepare_training_data.py` at all (`train_novel.py` builds targets directly via `resolve_gold_candidates`/`build_target_dist`).
-- **A single in-context example nearly doubled the zero-shot-to-one-shot Sinhala accuracy gap for Qwen3.5-4B** (0.6207 → 0.7673, §2c) — never stacked with any of the fine-tuning work in this report; a plausible, cheap, unexplored lever.
+- **A single in-context example nearly doubled the zero-shot-to-one-shot Sinhala accuracy gap for Qwen3.5-4B** (0.6207 → 0.7673, isolated pre-fine-tuning finding) — never stacked with any of the fine-tuning work in this report; a plausible, cheap, unexplored lever.
 - **The original 0.8044 sequential-curriculum checkpoint no longer exists anywhere retrievable** (only ever run in Colab/Drive, never saved to this repo) — moot now that curriculum v5 beats it outright, but it means ensembling with it was never actually possible during this work.
 
-## 14. Open questions / next steps
+## 13. Open questions / next steps
 
-**Current best, and the recommended submission: curriculum v5, 0.8062, beats the all-time record (0.8044).** §6's v6 follow-up (full per-stage CV+refit, lr=5e-5 throughout) was more rigorous but scored worse (0.7911) — closed as a negative result, not pursued further.
+**Current best, and the recommended submission: curriculum v5, 0.8062, beats the all-time record (0.8044).** §5's v6 follow-up (full per-stage CV+refit, lr=5e-5 throughout) was more rigorous but scored worse (0.7911) — closed as a negative result, not pursued further.
 
 1. **If revisiting the learning-rate question again**: a middle ground between v5 (lr=5e-5 only on the combined stage) and v6 (lr=5e-5 on every stage) was never tested — e.g. keep the early curriculum stages at `lr=1e-4` and only lower it for the later stages, or CV-validate the LR itself per stage instead of assuming one value applies everywhere.
-2. **Stack the one-shot-prompting finding (§2c)** with the current best checkpoint at inference time — untried, potentially cheap (no retraining, just a different prompt template at `predict_test.py` time).
+2. **Stack the one-shot-prompting finding** (the isolated Sinhala zero-shot-vs-one-shot result noted in Key findings) with the current best checkpoint at inference time — untried, potentially cheap (no retraining, just a different prompt template at `predict_test.py` time).
 3. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) — no longer needed to "catch up," but would still enable ensembling with v5 for a possible further boost.
-4. Individual-mechanism ablations (§4e, configs 2-5) were never run in isolation — would strengthen a paper write-up's claims about which mechanism contributes what, though not necessary to justify the empirical result.
+4. Individual-mechanism ablations (§3e, configs 2-5) were never run in isolation — would strengthen a paper write-up's claims about which mechanism contributes what, though not necessary to justify the empirical result.
 5. λ sweep beyond 0.5/0.6 (e.g. 0.25, 1.0) — low priority given 0.5 vs 0.6 showed no meaningful difference, and v5 already changed the more impactful hyperparameter (LR).
