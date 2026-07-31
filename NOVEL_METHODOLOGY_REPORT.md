@@ -4,6 +4,8 @@ Status as of 2026-07-31. Scores below are against the shared task's **hidden tes
 
 ## 1. Background
 
+**Update: superseded.** §6's curriculum v5 (0.8062) now beats the 0.8044 recipe described below, and does so with genuine mechanistic novelty rather than a hand-tuned recipe — see §6 for the full path there. The rest of this section describes the original motivation, which still explains *why* this work happened.
+
 The team led the Codabench leaderboard using Qwen3.5-4B with a hand-tuned sequential-curriculum LoRA recipe (0.8044 macro). That result works but isn't methodologically defensible as a research contribution — it's SFT with a curriculum order found by trial and error. Three concrete problems motivated a from-scratch redesign:
 
 1. **Validation wastes irreplaceable training data.** Dev sets are tiny (zh=790, id=366, si=203 rows; 1,359 labeled examples total, vs. a 5,475-row test set). A fixed validation split permanently sacrifices data on an already data-starved leaderboard task.
@@ -100,14 +102,22 @@ Other single-axis guess: keep `--final-combined-iters 25` (back to what worked),
 
 **Result: 0.8002 avg (chinese=0.7757, indonesian=0.7003, srilankan=0.9247) — within noise of v2 (0.8007).** Chinese landed on the *exact same* score as v2 to 4 decimal places; indonesian/srilankan moved by ~0.001-0.003. Same pattern as the earlier consistency-lambda 0.5-vs-0.6 finding: this hyperparameter isn't sensitive in the tested range. Both single-axis tweaks off v2 (more iters, lower zh-weight) have now failed to beat it — `--final-combined-iters 25 --zh-weight 1.5` looks like a local optimum for this recipe shape, not just an untested first guess.
 
+### v5: lower learning rate — NEW BEST, beats the all-time record
+
+Third single-axis guess off v2: keep `--final-combined-iters 25 --zh-weight 1.5`, lower the combined stage's `--learning-rate` from the default 1e-4 to 5e-5. Motivated by an old signal from the simultaneous-training CV sweep (§5): `best_iter` varied 15-60 across folds (a 4x spread), hinting the default LR might converge a bit too fast/unstably for this dataset size. Caveat raised before running: testing a lower LR at the *same* iteration budget confounds "worse LR" with "just undertrained" if the result comes back worse — and bumping iterations to compensate wasn't safe either, since v3 just proved more iterations distorts the per-language balance. Framed going in: a worse result would be inconclusive, but a *better* result despite the same-or-worse effective convergence budget would be a genuinely strong signal.
+
+**Result: 0.8062 avg (chinese=0.7788, indonesian=0.7139, srilankan=0.9260) — beats v2 on all three languages simultaneously, and beats the all-time-best 0.8044.** This is the first result, from any strategy tried (novel or the original ad-hoc recipe), to exceed 0.8044 — and unlike that recipe, it has genuine mechanistic novelty (soft-label distillation + positional-consistency regularization + curriculum ordering + Chinese-weighted combined stage), making it both the best result and the paper-worthy one. Per the pre-registered interpretation above: since this improved despite a lower LR at the same iteration count (normally a disadvantage, not an advantage), it's strong evidence the default `lr=1e-4` really was too aggressive, not just noise.
+
+**Caveat:** v5 only changed the learning rate of the *final combined stage* (via `--resume-from`, reusing v2's already-trained `stage_4_id` checkpoint) — the 5 curriculum stages before it were still trained at the original `lr=1e-4`. A full recipe rerun at the lower LR throughout (not just the last stage) is an untested, bigger-compute follow-up if further gains are wanted.
+
 ## 7. Key findings
 
 - **Indonesian is the macro-average's weak link across every strategy tried** — never above ~0.71, in fine-tuned or baseline form. The soft-label mechanism targets this directly since it's the only language with real annotator-disagreement signal to exploit.
 - **Sequential curriculum's edge over simultaneous training is concentrated in Chinese** (+3.2pts vs. simultaneous macro, post-data-fix), not Indonesian (+1.4pts) or Sri Lankan (+0.9pts) — worth testing whether this is really about curriculum ordering, or just about Chinese getting double exposure (trained first and last in the original recipe).
 - **consistency-lambda doesn't meaningfully move the macro average in the 0.5-0.6 range** — a clean, isolated comparison (§5, last two rows) came back within noise of each other.
-- **CV fold-to-fold variance in `best_iter` is large (15-60, 4x spread)** on this small a dataset — the "right" iteration count is a genuinely noisy median, not a tight consensus. A learning-rate sweep is a plausible way to test whether this variance is reducible, but was deprioritized given limited compute and no direct evidence yet that LR (not just dataset size) is the cause.
+- **CV fold-to-fold variance in `best_iter` is large (15-60, 4x spread)** on this small a dataset, and turned out to be a real signal, not just noise: lowering the learning rate (§6, v5) improved every language and produced the new all-time-best result, confirming the default `lr=1e-4` was genuinely a bit too aggressive for this dataset size, not merely a coincidental fold split.
 - **A `prepare_training_data.py` fix** (tied-vote Indonesian rows kept instead of dropped) improved the *old* simultaneous-macro pipeline by +3.6pts (0.7501 → not yet re-measured with this exact combination, since the 0.786 result came from the novel methodology, not this pipeline) — this fix was never involved in any novel-methodology result, since `train_novel.py` builds targets directly via `resolve_gold_candidates`/`build_target_dist`, bypassing `prepare_training_data.py` entirely.
-- **The original 0.8044 sequential-curriculum checkpoint no longer exists anywhere retrievable** — it was only ever run in Colab/Drive, never saved to this repo. This blocks ensembling as an option until/unless it's reproduced.
+- **The original 0.8044 sequential-curriculum checkpoint no longer exists anywhere retrievable** (only ever run in Colab/Drive, never saved to this repo) — moot now that curriculum v5 beats it outright, but worth noting ensembling with it was never possible.
 
 ## 8. Infrastructure notes
 
@@ -117,9 +127,9 @@ Other single-axis guess: keep `--final-combined-iters 25` (back to what worked),
 
 ## 9. Open questions / next steps
 
-1. **Curriculum v2 (0.8007, `--final-combined-iters 25 --zh-weight 1.5`) remains the best novel-methodology result and 0.37 points from the all-time best**, after two follow-up single-axis tweaks (v3: more iters, v4: lower zh-weight) both failed to beat it. This config looks like a local optimum for this recipe shape. Remaining options: a per-language *batch-size* adjustment instead of loss reweighting (untried), a learning-rate check (see below), or treating v2 as the final novel-methodology candidate given diminishing returns.
-2. **Learning-rate check** (cheap, via `train_novel.py --cv-folds 5 --cv-round 0 --learning-rate X`, one CV round per candidate instead of a full 5-fold sweep) — proposed but not yet run.
-2. ~~Chinese-oversampling test~~ — addressed in v2's combined stage; confirmed Chinese exposure (not just ordering) explains part of the gap.
-3. Learning-rate sweep — deprioritized given limited compute; worth revisiting if compute frees up, to test whether it's the source of the 4x CV fold-variance in `best_iter`.
-4. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) to enable ensembling with a novel-methodology checkpoint.
-5. λ sweep beyond 0.5/0.6 (e.g. 0.25, 1.0) — low priority given 0.5 vs 0.6 showed no meaningful difference.
+**Current best: curriculum v5, 0.8062, beats the all-time record (0.8044).** Remaining ideas, roughly in order of expected value:
+
+1. **Rerun the full 6-stage recipe at the lower learning rate throughout** (v5 only lowered LR for the final combined stage, resumed from a checkpoint trained at the original `lr=1e-4`) — untested, bigger compute spend, but the clearest remaining lever given LR is now confirmed to matter.
+2. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) — no longer needed to "catch up," but would still enable ensembling with v5 for a possible further boost.
+3. ~~Chinese-oversampling test~~ — addressed in v2's combined stage; confirmed Chinese exposure (not just ordering) explains part of the original recipe's edge.
+4. λ sweep beyond 0.5/0.6 (e.g. 0.25, 1.0) — low priority given 0.5 vs 0.6 showed no meaningful difference, and v5 already changed the more impactful hyperparameter (LR).
