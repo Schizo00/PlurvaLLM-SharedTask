@@ -94,6 +94,12 @@ Simplest next guess: keep `--zh-weight 1.5`, just increase `--final-combined-ite
 
 **Result: 0.7986 avg (chinese=0.7586, indonesian=0.6975, srilankan=0.9398) — worse than v2 (0.8007), not better.** Chinese dropped 1.71pts and Indonesian dropped 0.55pts, while Sri Lankan *gained* 1.63pts. The "more iterations helps proportionally" hypothesis is disproven: more combined-stage training shifted the model toward Sri Lankan specifically. Likely explanation — Sri Lankan has the smallest dataset of the three (203 rows), so at a fixed batch size with replacement sampling, its small example pool gets relatively more repeated exposure as total iterations increase, even though the per-language loss weighting (zh=1.5, id=si=1.0) never changed. **v2 remains the best novel-methodology result.** Iteration count and per-language weight both need real tuning together, not just cranking one number up in isolation.
 
+### v4: lower zh-weight instead (also no improvement)
+
+Other single-axis guess: keep `--final-combined-iters 25` (back to what worked), lower `--zh-weight` from 1.5 to 1.3.
+
+**Result: 0.8002 avg (chinese=0.7757, indonesian=0.7003, srilankan=0.9247) — within noise of v2 (0.8007).** Chinese landed on the *exact same* score as v2 to 4 decimal places; indonesian/srilankan moved by ~0.001-0.003. Same pattern as the earlier consistency-lambda 0.5-vs-0.6 finding: this hyperparameter isn't sensitive in the tested range. Both single-axis tweaks off v2 (more iters, lower zh-weight) have now failed to beat it — `--final-combined-iters 25 --zh-weight 1.5` looks like a local optimum for this recipe shape, not just an untested first guess.
+
 ## 7. Key findings
 
 - **Indonesian is the macro-average's weak link across every strategy tried** — never above ~0.71, in fine-tuned or baseline form. The soft-label mechanism targets this directly since it's the only language with real annotator-disagreement signal to exploit.
@@ -111,7 +117,8 @@ Simplest next guess: keep `--zh-weight 1.5`, just increase `--final-combined-ite
 
 ## 9. Open questions / next steps
 
-1. **Curriculum v2 (0.8007, `--final-combined-iters 25 --zh-weight 1.5`) is the best novel-methodology result and 0.37 points from the all-time best.** v3 showed simply increasing iterations doesn't help (it overfits toward Sri Lankan's smaller dataset instead) — remaining tuning needs to consider iteration count and per-language weight jointly, e.g. a lower `--zh-weight` at `--final-combined-iters 25`, or a per-language batch-size adjustment instead of loss reweighting. `--resume-from` makes each retry cheap (skips the 5 curriculum stages).
+1. **Curriculum v2 (0.8007, `--final-combined-iters 25 --zh-weight 1.5`) remains the best novel-methodology result and 0.37 points from the all-time best**, after two follow-up single-axis tweaks (v3: more iters, v4: lower zh-weight) both failed to beat it. This config looks like a local optimum for this recipe shape. Remaining options: a per-language *batch-size* adjustment instead of loss reweighting (untried), a learning-rate check (see below), or treating v2 as the final novel-methodology candidate given diminishing returns.
+2. **Learning-rate check** (cheap, via `train_novel.py --cv-folds 5 --cv-round 0 --learning-rate X`, one CV round per candidate instead of a full 5-fold sweep) — proposed but not yet run.
 2. ~~Chinese-oversampling test~~ — addressed in v2's combined stage; confirmed Chinese exposure (not just ordering) explains part of the gap.
 3. Learning-rate sweep — deprioritized given limited compute; worth revisiting if compute frees up, to test whether it's the source of the 4x CV fold-variance in `best_iter`.
 4. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) to enable ensembling with a novel-methodology checkpoint.
