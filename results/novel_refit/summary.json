@@ -1,0 +1,7 @@
+{
+  "final_refit": true,
+  "refit_iters": 50,
+  "consistency_lambda": 0.6,
+  "hard_labels": false,
+  "finished": true
+}
