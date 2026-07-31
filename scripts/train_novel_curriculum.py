@@ -250,6 +250,10 @@ def main():
     ap.add_argument("--zh-weight", type=float, default=1.5,
                      help="loss weight for zh in the final combined stage (others stay at 1.0) -- "
                           "the curriculum-mode analog of oversampling Chinese.")
+    ap.add_argument("--resume-from", default=None,
+                     help="path to an already-trained stage adapter (e.g. an earlier run's "
+                          "stage_4_id/adapter) to skip straight to --final-combined-iters from, "
+                          "instead of redoing all of --stages. Requires --final-combined-iters > 0.")
     ap.add_argument("--steps-per-report", type=int, default=5)
     ap.add_argument("--learning-rate", type=float, default=1e-4)
     ap.add_argument("--out-dir", default="results/novel_curriculum")
@@ -259,6 +263,10 @@ def main():
     for lang in stages:
         if lang not in LANGS:
             ap.error(f"--stages: unknown language {lang!r}, expected one of {LANGS}")
+    if args.resume_from and args.final_combined_iters <= 0:
+        ap.error("--resume-from requires --final-combined-iters > 0 (nothing to run otherwise)")
+    if args.resume_from and not Path(args.resume_from).exists():
+        ap.error(f"--resume-from path does not exist: {args.resume_from}")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -292,18 +300,23 @@ def main():
 
     stages_summary = []
     prev_adapter_path = None
-    for stage_idx, lang in enumerate(stages):
-        adapter_path, final_metric = run_stage(
-            stage_idx, lang, tokenizer, letter_ids, device, dtype, args,
-            prev_adapter_path, out_dir,
-        )
-        stages_summary.append({
-            "stage": stage_idx, "lang": lang, "iters": args.iters_per_stage,
-            "consistency_lambda": args.consistency_lambda,
-            "final_train_metric": final_metric, "adapter_path": str(adapter_path),
-        })
-        write_summary(stages_summary, finished=(stage_idx == total_stages - 1))
-        prev_adapter_path = adapter_path
+    if args.resume_from:
+        print(f"--resume-from set: skipping all of --stages, resuming directly from {args.resume_from}")
+        prev_adapter_path = Path(args.resume_from)
+        total_stages = 1  # only the combined stage runs
+    else:
+        for stage_idx, lang in enumerate(stages):
+            adapter_path, final_metric = run_stage(
+                stage_idx, lang, tokenizer, letter_ids, device, dtype, args,
+                prev_adapter_path, out_dir,
+            )
+            stages_summary.append({
+                "stage": stage_idx, "lang": lang, "iters": args.iters_per_stage,
+                "consistency_lambda": args.consistency_lambda,
+                "final_train_metric": final_metric, "adapter_path": str(adapter_path),
+            })
+            write_summary(stages_summary, finished=(stage_idx == total_stages - 1))
+            prev_adapter_path = adapter_path
 
     if args.final_combined_iters > 0:
         stage_idx = len(stages)
