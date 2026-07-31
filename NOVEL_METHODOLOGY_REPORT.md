@@ -67,7 +67,13 @@ Every result in §5 tested the new mechanisms only under *simultaneous* training
 
 New script: `scripts/train_novel_curriculum.py`. Recipe: **zh → id → aug-si → aug-zh**, each stage continuing from the prior stage's adapter (`PeftModel.from_pretrained(..., is_trainable=True)`), training only on that stage's own language (not cumulative replay — matches the original recipe's low-forgetting behavior). Soft-label distillation + consistency regularization (λ=0.5) applied uniformly at every stage — replacing the original recipe's ad-hoc row-duplication "augmentation" with the actual novel mechanism. 25 fixed iterations/stage (reusing the CV-validated count from §5), no per-stage CV, one deliberate unswept run.
 
-Checkpoint-continuation logic verified correct via a targeted unit check (perturbed a LoRA weight, saved, reloaded fresh, confirmed exact match rather than silent reinitialization) before committing to a real run. Result: **pending** (run in progress / not yet submitted).
+Checkpoint-continuation logic verified correct via a targeted unit check (perturbed a LoRA weight, saved, reloaded fresh, confirmed exact match rather than silent reinitialization) before committing to a real run.
+
+**Result: 0.7799 avg (chinese=0.7654, indonesian=0.6683, srilankan=0.9059) — underperforms both references.** The hypothesis did not pan out: this scores below the simultaneous novel-methodology results (0.7860-0.7863) *and* well below the original curriculum (0.8044). Confirmed via cloud training logs that all 4 stages genuinely completed all 25/25 iterations (not a truncated/broken run) before drawing this conclusion.
+
+Notably, Indonesian scored its worst across every novel-methodology attempt (0.6683). Working hypothesis: in this new-language-only, no-cumulative-replay stage schedule (zh→id→si→zh), Indonesian is trained once in stage 1 and never revisited, while Chinese is trained first *and* last (stage 3). If the new soft-label+consistency loss causes even mild catastrophic forgetting between stages — unlike the original recipe's plain hard-label CE, described in the memory record as having "almost no forgetting" — Indonesian is the language most exposed to it, having two full subsequent stages with none of its own data before the run ends. Not yet confirmed; would need a 5th stage revisiting Indonesian, or per-stage validation tracking Indonesian's metric across stages 2-3, to test directly.
+
+A real infrastructure bug was also found and fixed from this run's logs: recurring (non-fatal) CUDA OOM warnings throughout every stage — the allocator retried and recovered each time, but GPU free memory was repeatedly dropping under 1GB on a 31GB card. `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` had only ever been added to the Colab notebook during earlier T4-OOM debugging, never ported to `train_novel.py`/`train_novel_curriculum.py` — fixed post-hoc, doesn't invalidate this result (training did complete correctly) but should prevent a harder failure on a future run.
 
 ## 7. Key findings
 
@@ -86,7 +92,7 @@ Checkpoint-continuation logic verified correct via a targeted unit check (pertur
 
 ## 9. Open questions / next steps
 
-1. Curriculum + novel-methodology result (§6) — pending, highest priority.
+1. Curriculum + novel-methodology combination underperformed (§6, 0.7799) — the Indonesian-forgetting hypothesis is the leading explanation but unconfirmed. Worth testing a 5th stage revisiting Indonesian, or abandoning this direction in favor of the other levers below given limited compute.
 2. Chinese-oversampling test — does per-language sampling weight (not just curriculum order) explain sequential curriculum's Chinese-specific edge?
 3. Learning-rate sweep — deprioritized given limited compute; worth revisiting if compute frees up, to test whether it's the source of the 4x CV fold-variance in `best_iter`.
 4. Reproduce the original sequential-curriculum checkpoint (no new mechanisms) to enable ensembling with a novel-methodology checkpoint.
