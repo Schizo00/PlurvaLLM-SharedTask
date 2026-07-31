@@ -48,6 +48,7 @@ from pathlib import Path
 # loop, but harmless and cheap insurance against a wider range of ops, e.g.
 # the JS-divergence gather in consistency_loss).
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 import torch.nn.functional as F
