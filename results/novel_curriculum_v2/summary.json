@@ -1,0 +1,66 @@
+{
+  "stages": [
+    "zh",
+    "id",
+    "si",
+    "zh",
+    "id"
+  ],
+  "hard_labels": false,
+  "consistency_lambda": 0.5,
+  "iters_per_stage": 25,
+  "final_combined_iters": 25,
+  "zh_weight": 1.5,
+  "completed_stages": [
+    {
+      "stage": 0,
+      "lang": "zh",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v2/stage_0_zh/adapter"
+    },
+    {
+      "stage": 1,
+      "lang": "id",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v2/stage_1_id/adapter"
+    },
+    {
+      "stage": 2,
+      "lang": "si",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v2/stage_2_si/adapter"
+    },
+    {
+      "stage": 3,
+      "lang": "zh",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v2/stage_3_zh/adapter"
+    },
+    {
+      "stage": 4,
+      "lang": "id",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v2/stage_4_id/adapter"
+    },
+    {
+      "stage": 5,
+      "lang": "combined",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "zh_weight": 1.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v2/stage_5_combined/adapter"
+    }
+  ],
+  "finished": true
+}

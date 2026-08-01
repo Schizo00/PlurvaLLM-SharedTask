@@ -71,6 +71,21 @@ New script `train_novel_curriculum.py`: each stage trains one language, continui
 
 **v6** was a follow-up that replaced every hand-chosen iteration count with a CV-validated one (via a new, separate script, `train_novel_curriculum_cv.py`, which does not modify any existing script) and applied the lower learning rate to all six stages, not just the last. It underperformed v5. Leading hypothesis: the lower learning rate was only shown to help the *final* stage (fine-tuning an already-adapted model); applying it to early stages training from the base model may have limited the progress those stages could make in a small number of steps. This is the third time in this arc (after v3, v4) that a more thorough single-axis extension beyond what testing specifically validated has underperformed the combination that testing actually found.
 
+## Artifacts
+
+Adapter configs, per-stage/per-slot summaries, and test-set predictions for the curriculum runs (v1 unlabeled, v2-v6) are committed under `results/`. LoRA weight files (`adapter_model.safetensors`, ~80MB each) are excluded from git (`.gitignore`) to avoid re-introducing the repository bloat that a prior cleanup removed; they remain available on the cloud instance.
+
+| Version | Adapter/summary path | Test predictions |
+|---|---|---|
+| v1 | `results/novel_curriculum/` | — |
+| v2 | `results/novel_curriculum_v2/` | `results/test_submission_curriculum_v2.jsonl` |
+| v3 | `results/novel_curriculum_v3/` | `results/test_submission_curriculum_v3.jsonl` |
+| v4 | `results/novel_curriculum_v4/` | `results/test_submission_curriculum_v4.jsonl` |
+| v5 | `results/novel_curriculum_v5/` | `results/test_submission_curriculum_v5.jsonl` |
+| v6 (`train_novel_curriculum_cv.py`) | `results/novel_curriculum_cv/` | `results/test_submission_curriculum_cv.jsonl` |
+
+`results/test_submission_curriculum.jsonl` is an additional prediction file from the curriculum work (unlabeled by version in the source folder).
+
 ## Key takeaways
 
 - Curriculum ordering combined with the soft-label and consistency mechanisms was the strategy that ultimately beat the 0.8044 reference point.

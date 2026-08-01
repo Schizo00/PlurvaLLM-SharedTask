@@ -1,0 +1,18 @@
+{
+  "slot": 0,
+  "lang": "zh",
+  "cv_folds": 5,
+  "best_iters": [
+    35,
+    65,
+    75,
+    15,
+    45
+  ],
+  "refit_iters": 45,
+  "consistency_lambda": 0.5,
+  "zh_weight": null,
+  "learning_rate": 5e-05,
+  "adapter_path": "results/novel_curriculum_cv/slot_0_zh/adapter",
+  "finished": true
+}

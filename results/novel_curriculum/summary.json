@@ -1,0 +1,46 @@
+{
+  "stages": [
+    "zh",
+    "id",
+    "si",
+    "zh"
+  ],
+  "hard_labels": false,
+  "consistency_lambda": 0.5,
+  "iters_per_stage": 25,
+  "completed_stages": [
+    {
+      "stage": 0,
+      "lang": "zh",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum/stage_0_zh/adapter"
+    },
+    {
+      "stage": 1,
+      "lang": "id",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum/stage_1_id/adapter"
+    },
+    {
+      "stage": 2,
+      "lang": "si",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum/stage_2_si/adapter"
+    },
+    {
+      "stage": 3,
+      "lang": "zh",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum/stage_3_zh/adapter"
+    }
+  ],
+  "finished": true
+}

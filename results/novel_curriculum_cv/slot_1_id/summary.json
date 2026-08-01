@@ -1,0 +1,18 @@
+{
+  "slot": 1,
+  "lang": "id",
+  "cv_folds": 5,
+  "best_iters": [
+    30,
+    60,
+    35,
+    35,
+    25
+  ],
+  "refit_iters": 35,
+  "consistency_lambda": 0.5,
+  "zh_weight": null,
+  "learning_rate": 5e-05,
+  "adapter_path": "results/novel_curriculum_cv/slot_1_id/adapter",
+  "finished": true
+}

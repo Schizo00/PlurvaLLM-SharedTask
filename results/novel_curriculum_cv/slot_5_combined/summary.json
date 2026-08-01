@@ -1,0 +1,18 @@
+{
+  "slot": 5,
+  "lang": "combined",
+  "cv_folds": 5,
+  "best_iters": [
+    60,
+    20,
+    5,
+    45,
+    110
+  ],
+  "refit_iters": 45,
+  "consistency_lambda": 0.5,
+  "zh_weight": 1.5,
+  "learning_rate": 5e-05,
+  "adapter_path": "results/novel_curriculum_cv/slot_5_combined/adapter",
+  "finished": true
+}

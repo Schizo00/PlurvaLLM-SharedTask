@@ -1,0 +1,26 @@
+{
+  "stages": [
+    "zh",
+    "id",
+    "si",
+    "zh",
+    "id"
+  ],
+  "hard_labels": false,
+  "consistency_lambda": 0.5,
+  "iters_per_stage": 25,
+  "final_combined_iters": 25,
+  "zh_weight": 1.5,
+  "completed_stages": [
+    {
+      "stage": 5,
+      "lang": "combined",
+      "iters": 25,
+      "consistency_lambda": 0.5,
+      "zh_weight": 1.5,
+      "final_train_metric": null,
+      "adapter_path": "results/novel_curriculum_v5/stage_5_combined/adapter"
+    }
+  ],
+  "finished": true
+}
